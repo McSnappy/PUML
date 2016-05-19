@@ -107,7 +107,7 @@ Build A Random Forest:
       exit(1);
     }
 
-With Out Of Bag Output And Feature Importance (truncated):
+With Out Of Bag Error Output And Feature Importance (truncated):
 
     Instances: 58101
     Correctly Classified: 46302 (80%)
