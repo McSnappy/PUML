@@ -25,6 +25,7 @@ SOFTWARE.
 
 #include "machinelearning.h"
 
+namespace puml {
 
 typedef enum {
 
@@ -109,7 +110,7 @@ typedef struct {
 // Builds a decision tree given the instance definition, data, and tree build config.  
 // returns true on success, false otherwise.
 //
-bool dt_buildDecisionTree(const ml_instance_definition &mlid, const ml_data &mld, const dt_build_config &dtbc, dt_tree &tree);
+bool buildDecisionTree(const ml_instance_definition &mlid, const ml_data &mld, const dt_build_config &dtbc, dt_tree &tree);
 
 
 //
@@ -121,36 +122,39 @@ bool dt_buildDecisionTree(const ml_instance_definition &mlid, const ml_data &mld
 // discrete_value_index to the actual categorical name (use tree.index_of_feature_to_predict to get the index of the ml_feature_desc
 // from the ml_instance_definition. The ml_feature_desc has a vector of category names, discrete_values. Use discrete_values[discrete_value_index]).
 //
-// The tree owns the resources for the returned ml_feature_value, which will be released with a call to dt_freeDecisionTree()
+// The tree owns the resources for the returned ml_feature_value, which will be released with a call to freeDecisionTree()
 //
-const ml_feature_value *dt_evaluateDecisionTreeForInstance(const ml_instance_definition &mlid, const dt_tree &tree, const ml_instance &instance);
+const ml_feature_value *evaluateDecisionTreeForInstance(const ml_instance_definition &mlid, const dt_tree &tree, const ml_instance &instance);
 
 
 //
 // Release memory and clear the tree structure
 //
-void dt_freeDecisionTree(dt_tree &tree);
+void freeDecisionTree(dt_tree &tree);
 
 
 //
 // Text based display of decision tree
 //
-void dt_printDecisionTreeSummary(const ml_instance_definition &mlid, const dt_tree &tree);
+void printDecisionTreeSummary(const ml_instance_definition &mlid, const dt_tree &tree);
 
 
 //
 // Evaluates every instance in mld and prints the regression or classification summary
 //
-void dt_printDecisionTreeResultsForData(const ml_instance_definition &mlid, const ml_data &mld, const dt_tree &tree);
+void printDecisionTreeResultsForData(const ml_instance_definition &mlid, const ml_data &mld, const dt_tree &tree);
 
 
 //
 // Read/Write Decision Tree to disk (JSON)
 //
-bool dt_writeDecisionTreeToFile(const ml_string &path_to_file, const dt_tree &tree);
-bool dt_readDecisionTreeFromFile(const ml_string &path_to_file, dt_tree &tree);
+bool writeDecisionTreeToFile(const ml_string &path_to_file, const dt_tree &tree);
+bool readDecisionTreeFromFile(const ml_string &path_to_file, dt_tree &tree);
 
+
+} // namespace puml
 
 #endif
+
 
 

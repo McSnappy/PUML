@@ -25,6 +25,8 @@ SOFTWARE.
 
 #include "decisiontree.h"
 
+namespace puml {
+
 typedef struct {
 
   ml_uint number_of_threads; 
@@ -54,14 +56,14 @@ typedef struct {
 //
 // returns true on success, false otherwise
 //
-bool rf_buildRandomForest(const ml_instance_definition &mlid, const ml_data &mld, const rf_build_config &rfbc, 
-			  rf_forest &forest, ml_vector<ml_feature_value> *oob_for_mld = nullptr);
+bool buildRandomForest(const ml_instance_definition &mlid, const ml_data &mld, const rf_build_config &rfbc, 
+		       rf_forest &forest, ml_vector<ml_feature_value> *oob_for_mld = nullptr);
 
 
 //
 // Release memory and clear the forest structure
 //
-void rf_freeRandomForest(rf_forest &forest);
+void freeRandomForest(rf_forest &forest);
 
 
 //
@@ -77,25 +79,28 @@ void rf_freeRandomForest(rf_forest &forest);
 //
 // returns true on success, otherwise false
 //
-bool rf_evaluateRandomForestForInstance(const ml_instance_definition &mlid, const rf_forest &forest, const ml_instance &instance, 
-					ml_feature_value &prediction, ml_vector<ml_feature_value> *tree_predictions = nullptr);
+bool evaluateRandomForestForInstance(const ml_instance_definition &mlid, const rf_forest &forest, const ml_instance &instance, 
+				     ml_feature_value &prediction, ml_vector<ml_feature_value> *tree_predictions = nullptr);
 
 
 //
 // Evaluates every instance in mld and prints the regression or classification summary
 //
-void rf_printRandomForestResultsForData(const ml_instance_definition &mlid, const ml_data &mld, const rf_forest &forest);
+void printRandomForestResultsForData(const ml_instance_definition &mlid, const ml_data &mld, const rf_forest &forest);
 
 
 //
 // Read/Write Random Forest to disk, including the instance definition (JSON) 
 //
-bool rf_writeRandomForestToDirectory(const ml_string &path_to_dir, const ml_instance_definition &mlid, 
+bool writeRandomForestToDirectory(const ml_string &path_to_dir, const ml_instance_definition &mlid, 
 				     const rf_forest &forest, bool overwrite_existing = true);
-bool rf_readRandomForestFromDirectory(const ml_string &path_to_dir, ml_instance_definition &mlid, rf_forest &forest);
+bool readRandomForestFromDirectory(const ml_string &path_to_dir, ml_instance_definition &mlid, rf_forest &forest);
 
 
+
+} // namespace puml
 
 #endif
+
 
 

@@ -14,7 +14,7 @@ debug: CXXFLAGS += -g -DDEBUG=1
 debug: clean mltest
 
 mltest:
-	$(CXX) $(CXXFLAGS) -I . mltest.cpp machinelearning.cpp knn.cpp decisiontree.cpp randomforest.cpp cJSON/cJSON.cpp -o mltest -lpthread
+	$(CXX) $(CXXFLAGS) -I . mltest.cpp machinelearning.cpp mlutil.cpp logging.cpp knn.cpp decisiontree.cpp randomforest.cpp boosting.cpp cJSON/cJSON.cpp -o mltest -lpthread
 
 clean: 
 	rm -f ./mltest

@@ -32,7 +32,7 @@ SOFTWARE.
 #include "logging.h"
 #include "cJSON/cJSON.h"
 
-#define ML_VERSION 0.1
+namespace puml {
 
 typedef enum {
 
@@ -52,6 +52,8 @@ typedef double ml_double;
 typedef uint32_t ml_uint;
 typedef std::string ml_string;
 
+extern const ml_float ML_VERSION; 
+
 template <typename T>
 using ml_vector = std::vector<T>;
 
@@ -70,8 +72,8 @@ typedef struct {
 
 
 // pass a 0 to initialize the seed using the clock
-ml_rng_config *ml_createRngConfigWithSeed(ml_uint seed); 
-ml_uint ml_generateRandomNumber(ml_rng_config *rng_config);
+ml_rng_config *createRngConfigWithSeed(ml_uint seed); 
+ml_uint generateRandomNumber(ml_rng_config *rng_config);
 
 
 //
@@ -79,12 +81,12 @@ ml_uint ml_generateRandomNumber(ml_rng_config *rng_config);
 // to give identical results across machines and compilers
 //
 template <typename T>
-void ml_shuffleVector(ml_vector<T> &vec, ml_rng_config *rng_config);
+void shuffleVector(ml_vector<T> &vec, ml_rng_config *rng_config);
 
 template <typename T>
-void ml_shuffleVector(ml_vector<T> &vec, ml_rng_config *rng_config) {
+void shuffleVector(ml_vector<T> &vec, ml_rng_config *rng_config) {
   for (std::size_t ii = vec.size() - 1; ii > 0; --ii) {
-    std::swap(vec[ii], vec[ml_generateRandomNumber(rng_config) % (ii + 1)]);
+    std::swap(vec[ii], vec[generateRandomNumber(rng_config) % (ii + 1)]);
   }
 }
 
@@ -100,7 +102,7 @@ typedef struct {
   bool preserve_missing; // false (default): use feature's global mean/mode. 
                          // true: insert out of range value for continuous features and separate category for discrete. 
                          // This option is available from the instance defintion row, the first row, of the data set. 
-                         // see ml_loadInstanceDataFromFile() below
+                         // see loadInstanceDataFromFile() below
 
   ml_float mean;
   ml_float sd;
@@ -147,7 +149,7 @@ typedef ml_vector<ml_instance *> ml_mutable_data;
 
 
 //
-// ml_loadInstanceDataFromFile() 
+// loadInstanceDataFromFile() 
 //
 // path_to_input_file -- csv file where each row represents an instance, and the first row is in 
 //                       the instance definition format below.
@@ -165,14 +167,14 @@ typedef ml_vector<ml_instance *> ml_mutable_data;
 // and a separate category for missing discrete features will be created. The 
 // default will use the feature's global mean or mode to populate missing values.
 //
-bool ml_loadInstanceDataFromFile(const ml_string &path_to_input_file, ml_instance_definition &mlid, ml_data &mld);
+bool loadInstanceDataFromFile(const ml_string &path_to_input_file, ml_instance_definition &mlid, ml_mutable_data &mld);
 
 
 //
 // The internal category values for discrete features are defined based on the order that each
-// distinct category is found in the data when loaded with ml_loadInstanceDataFromFile(). If you
+// distinct category is found in the data when loaded with loadInstanceDataFromFile(). If you
 // wish to run a model built from training data on test data from a separate file you should
-// use ml_loadInstanceDataFromFileUsingInstanceDefinition() to force the load of test data 
+// use loadInstanceDataFromFileUsingInstanceDefinition() to force the load of test data 
 // to use category definitions from the training data's ml_instance_definition.
 // 
 // returns true on success, false otherwise.
@@ -180,14 +182,14 @@ bool ml_loadInstanceDataFromFile(const ml_string &path_to_input_file, ml_instanc
 // ids is an optional parameter that will be populated with the first column of the data file (id column
 // of test data from kaggle competition, etc).
 //
-bool ml_loadInstanceDataFromFileUsingInstanceDefinition(const ml_string &path_to_input_file, const ml_instance_definition &mlid, 
-							ml_data &mld, ml_vector<ml_string> *ids = nullptr);
+bool loadInstanceDataFromFileUsingInstanceDefinition(const ml_string &path_to_input_file, const ml_instance_definition &mlid, 
+						     ml_mutable_data &mld, ml_vector<ml_string> *ids = nullptr);
 
 
 //
 // free memory used for instances and empty mld
 //
-void ml_freeInstanceData(ml_data &mld);
+void freeInstanceData(ml_mutable_data &mld);
 
 
 //
@@ -195,34 +197,36 @@ void ml_freeInstanceData(ml_data &mld);
 // after the call, training will have training_factor fraction of the data, test will have 
 // the remainder and mld will be empty.
 //
-void ml_splitDataIntoTrainingAndTest(ml_data &mld, ml_float training_factor, ml_rng_config *rng_config, ml_data &training, ml_data &test);
+void splitDataIntoTrainingAndTest(ml_mutable_data &mld, ml_float training_factor, 
+				  ml_rng_config *rng_config, ml_mutable_data &training, 
+				  ml_mutable_data &test);
 
 
 //
 // Displays a summary of features including name, type, distribution, etc.
 //
-void ml_printInstanceDataSummary(const ml_instance_definition &mlid);
+void printInstanceDataSummary(const ml_instance_definition &mlid);
 
 
 //
 // Returns the internal column index for a feature with the given name
 //
-ml_uint ml_indexOfFeatureWithName(const ml_string &feature_name, const ml_instance_definition &mlid);
+ml_uint indexOfFeatureWithName(const ml_string &feature_name, const ml_instance_definition &mlid);
 
 
 //
 // One Hot Encoding: Converts discrete (categorical) features to continuous binary features
 //
-bool ml_createOneHotEncodingForData(const ml_instance_definition &mlid, const ml_data &mld, 
-				    const ml_string &name_of_feature_to_predict, 
-				    ml_instance_definition &mlid_ohe, ml_data &mld_ohe);
+bool createOneHotEncodingForData(const ml_instance_definition &mlid, const ml_data &mld, 
+				 const ml_string &name_of_feature_to_predict, 
+				 ml_instance_definition &mlid_ohe, ml_data &mld_ohe);
 
 
 //
 // Save/Read Instance Definition To Disk (JSON)
 //
-bool ml_writeInstanceDefinitionToFile(const ml_string &path_to_file, const ml_instance_definition &mlid);
-bool ml_readInstanceDefinitionFromFile(const ml_string &path_to_file, ml_instance_definition &mlid);
+bool writeInstanceDefinitionToFile(const ml_string &path_to_file, const ml_instance_definition &mlid);
+bool readInstanceDefinitionFromFile(const ml_string &path_to_file, ml_instance_definition &mlid);
 
 
 // 
@@ -237,10 +241,10 @@ typedef struct {
 } ml_classification_results;
 
 
-void ml_collectClassificationResultForInstance(const ml_instance_definition &mlid, ml_uint index_of_feature_to_predict, const ml_instance &instance, 
-					       const ml_feature_value *result, ml_classification_results &mlcr);
-void ml_printClassificationResultsSummary(const ml_instance_definition &mlid, ml_uint index_of_feature_to_predict, const ml_classification_results &mlcr);
-
+void collectClassificationResultForInstance(const ml_instance_definition &mlid, ml_uint index_of_feature_to_predict, const ml_instance &instance, 
+					    const ml_feature_value *result, ml_classification_results &mlcr);
+void printClassificationResultsSummary(const ml_instance_definition &mlid, ml_uint index_of_feature_to_predict, const ml_classification_results &mlcr);
+ 
 
 //
 // Aggregate Regression Results
@@ -254,13 +258,15 @@ typedef struct {
   
 } ml_regression_results;
 
-void ml_collectRegressionResultForInstance(const ml_instance_definition &mlid, ml_uint index_of_feature_to_predict, const ml_instance &instance, 
-					   const ml_feature_value *result, ml_regression_results &mlrr);
-void ml_printRegressionResultsSummary(const ml_regression_results &mlrr);
+void collectRegressionResultForInstance(const ml_instance_definition &mlid, ml_uint index_of_feature_to_predict, const ml_instance &instance, 
+					const ml_feature_value *result, ml_regression_results &mlrr);
+void printRegressionResultsSummary(const ml_regression_results &mlrr);
 
 
-bool ml_writeModelJSONToFile(const ml_string &path_to_file, cJSON *json_object);
-cJSON *ml_readModelJSONFromFile(const ml_string &path_to_file);
+bool writeModelJSONToFile(const ml_string &path_to_file, cJSON *json_object);
+cJSON *readModelJSONFromFile(const ml_string &path_to_file);
+
+} // namespace puml
 
 #endif
 

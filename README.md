@@ -2,9 +2,9 @@
 Poor Unwashed Machine Learner
 -----------------------------
 
-A simple-headed C++ implementation of Decision Trees, Random Forest, and kNN for classification and regression. 
+A simple-headed C++ implementation of Decision Trees, Random Forest, Boosted Trees, and kNN for classification and regression. 
 
-The included sample program, mltest, uses the [Iris](https://archive.ics.uci.edu/ml/datasets/Iris "Title")  and [Covertype](https://archive.ics.uci.edu/ml/datasets/Covertype "Title") datasets from UCI to demonstrate building trees and forests.  
+The included sample program, mltest, uses the [Iris](https://archive.ics.uci.edu/ml/datasets/Iris ""), [Covertype](https://archive.ics.uci.edu/ml/datasets/Covertype ""), and [Wine Quality](https://archive.ics.uci.edu/ml/datasets/Wine+Quality "") datasets from UCI to demonstrate building trees and forests.  
 
 PUML uses Dave Gamble's [cJSON](https://github.com/DaveGamble/cJSON "Title") to read/write its models.
   
@@ -19,7 +19,7 @@ Build and run mltest:
 Load Data:
 ----------
     //
-    // ml_loadInstanceDataFromFile()
+    // loadInstanceDataFromFile()
     //
     // path_to_input_file -- csv file where each row represents an instance, and the first row is in
     //                       the instance definition format below.
@@ -37,28 +37,26 @@ Load Data:
     // and a separate category for missing discrete features will be created. The
     // default will use the feature's global mean or mode to populate missing values.
     //
-    // bool ml_loadInstanceDataFromFile(const ml_string &path_to_input_file, ml_instance_definition &mlid, ml_data &mld);
+    // bool loadInstanceDataFromFile(const ml_string &path_to_input_file, ml_instance_definition &mlid, ml_data &mld);
     //
     // ex:
-    ml_data iris_mld;
-    ml_instance_definition iris_mlid;
-    ml_loadInstanceDataFromFile("./iris.csv", iris_mlid, iris_mld);
+    puml::ml_mutable_data iris_mld;
+    puml::ml_instance_definition iris_mlid;
+    puml::loadInstanceDataFromFile("./iris.csv", iris_mlid, iris_mld);
   
 
 Build A Decision Tree:
 ----------------------
 
-    dt_tree iris_tree;
-    dt_build_config dtbc = {};
+    puml::dt_tree iris_tree;
+    puml::dt_build_config dtbc = {};
     dtbc.max_tree_depth = 6;
     dtbc.min_leaf_instances = 2;
-    dtbc.index_of_feature_to_predict = ml_indexOfFeatureWithName("Class", iris_mlid);
-    if(!dt_buildDecisionTree(iris_mlid, iris_training, dtbc, iris_tree)) {
-      ml_log_error("failed to build tree...\n");
-      exit(1);
-    }
+    dtbc.index_of_feature_to_predict = puml::indexOfFeatureWithName("Class", iris_mlid);
+    puml::buildDecisionTree(iris_mlid, 
+    			    puml::ml_data(iris_training.begin(), iris_training.end()), dtbc, iris_tree);
 
-    dt_printDecisionTreeSummary(iris_mlid, iris_tree); 
+    puml::printDecisionTreeSummary(iris_mlid, iris_tree); 
 
 With Output:
 
@@ -92,20 +90,19 @@ And Results On A Holdout Set:
 
 Build A Random Forest:
 ----------------------
-    rf_forest cover_forest;
-    rf_build_config rfbc = {};
-    rfbc.index_of_feature_to_predict = ml_indexOfFeatureWithName("CoverType", cover_mlid);
+    puml::rf_forest cover_forest;
+    puml::rf_build_config rfbc = {};
+    rfbc.index_of_feature_to_predict = puml::indexOfFeatureWithName("CoverType", cover_mlid);
     rfbc.number_of_trees = 50;
     rfbc.number_of_threads = 2;
     rfbc.max_tree_depth = 30;
     rfbc.seed = 999;
     rfbc.max_continuous_feature_splits = 20; // experimental optimization
-    rfbc.features_to_consider_per_node = (ml_uint)(sqrt(cover_mlid.size()-1) + 0.5);
+    rfbc.features_to_consider_per_node = (puml::ml_uint)(sqrt(cover_mlid.size()-1) + 0.5);
     
-    if(!rf_buildRandomForest(cover_mlid, cover_training, rfbc, cover_forest)) {
-      ml_log_error("failed to build random forest...\n");
-      exit(1);
-    }
+    puml::buildRandomForest(cover_mlid, 
+    	                   puml::ml_data(cover_training.begin(), cover_training.end()), rfbc, cover_forest);
+
 
 With Out Of Bag Error Output And Feature Importance (truncated):
 
@@ -146,7 +143,7 @@ With Out Of Bag Error Output And Feature Importance (truncated):
 
 Save A Random Forest:
 ---------------------
-    rf_writeRandomForestToDirectory("./rf-cover", cover_mlid, cover_forest);
+    puml::writeRandomForestToDirectory("./rf-cover", cover_mlid, cover_forest);
 
     The directory ./rf-cover will be created and filled with your trees:
     $ ls
@@ -160,8 +157,8 @@ Save A Random Forest:
     tree14.1463692228.json	tree22.1463692228.json	tree30.1463692228.json	tree39.1463692228.json	tree47.1463692228.json
     tree15.1463692228.json	tree23.1463692228.json	tree31.1463692228.json	tree4.1463692228.json	tree48.1463692228.json
     
-    // use rf_readRandomForestFromDirectory() to load the forest. See the note 
-    // on ml_loadInstanceDataFromFileUsingInstanceDefinition() 
+    // use puml::readRandomForestFromDirectory() to load the forest. See the note 
+    // on puml::loadInstanceDataFromFileUsingInstanceDefinition() 
     // for details on categorical data mapping when loading new test datasets
 
 Copyright (c) 2016 Carl Sherrell

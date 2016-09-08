@@ -20,23 +20,37 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-#ifndef __KNN_H__
-#define __KNN_H__
-
-#include "machinelearning.h"
+#include "logging.h"
+#include <stdarg.h>
 
 namespace puml {
 
-  typedef std::pair<ml_double, const ml_instance *> knn_neighbor; // distance and the instance 
-  
-  bool findNearestNeighborsForInstance(const ml_instance_definition &mlid, const ml_data &mld, const ml_instance &instance, 
-				       ml_uint k, ml_uint index_of_feature_to_predict, ml_feature_value &prediction, 
-				       ml_vector<knn_neighbor> *neighbors_considered = nullptr);
-  
-  bool printNearestNeighborsResultsForData(const ml_instance_definition &mlid, const ml_data &training,
-					   const ml_data &test, ml_uint k, ml_uint index_of_feature_to_predict);
-
-} 
+void log(const char *format, ... ) {
+  va_list arglist;
+  va_start(arglist, format);
+  vprintf(format, arglist);
+  va_end(arglist);
+  fflush(stdout);
+}
 
 
-#endif
+void log_warn(const char *format, ... ) {
+  printf("WARNING --> [%s():%d]  ", __FUNCTION__, __LINE__);
+  va_list arglist;
+  va_start(arglist, format);
+  vprintf(format, arglist);
+  va_end(arglist);
+  fflush(stdout);
+}
+ 
+
+void log_error(const char *format, ... ) {
+  printf("ERROR --> [%s():%d]  ", __FUNCTION__, __LINE__);
+  va_list arglist;
+  va_start(arglist, format);
+  vprintf(format, arglist);
+  va_end(arglist);
+  fflush(stdout);
+}
+
+} // namespace puml

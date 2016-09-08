@@ -23,27 +23,28 @@ SOFTWARE.
 #include "knn.h"
 #include <algorithm>
 
+namespace puml {
 
-bool _knn_validateInput(const ml_instance_definition &mlid, const ml_data &mld, 
-			const ml_instance &instance, ml_uint k, ml_uint index_of_feature_to_predict) {
+static bool validateInput(const ml_instance_definition &mlid, const ml_data &mld, 
+			  const ml_instance &instance, ml_uint k, ml_uint index_of_feature_to_predict) {
 			
   if(mlid.empty()) {
-    ml_log_error("empty instance definition...\n");
+    log_error("empty instance definition...\n");
     return(false);
   }
 
   if(mld.empty()) {
-    ml_log_error("empty neighbor list...\n");
+    log_error("empty neighbor list...\n");
     return(false);
   }
 
   if(instance.size() != mlid.size()) {
-    ml_log_error("mismatch b/t instance and definition sizes...\n");
+    log_error("mismatch b/t instance and definition sizes...\n");
     return(false);
   }
 
   if(index_of_feature_to_predict >= mlid.size()) {
-    ml_log_error("invalid feature to predict...\n");
+    log_error("invalid feature to predict...\n");
     return(false);
   }
 
@@ -54,22 +55,22 @@ bool _knn_validateInput(const ml_instance_definition &mlid, const ml_data &mld,
     }
 
     if(mlid[ii].type != ML_FEATURE_TYPE_CONTINUOUS) {
-      ml_log_error("'%s' is not a continuous feature...\n", mlid[ii].name.c_str());
+      log_error("'%s' is not a continuous feature...\n", mlid[ii].name.c_str());
       return(false);
     }
   }
 
   if(k == 0) {
-    ml_log_error("k must be > 0\n");
+    log_error("k must be > 0\n");
     return(false);
   }
 
   return(true);
 }
 
-void _knn_predictUsingNeighbors(const ml_vector<knn_neighbor> &all_distances, const ml_instance_definition &mlid, 
-				ml_uint k, ml_uint index_of_feature_to_predict, ml_feature_value &prediction, 
-				ml_vector<knn_neighbor> *neighbors_considered) {
+static void predictUsingNeighbors(const ml_vector<knn_neighbor> &all_distances, const ml_instance_definition &mlid, 
+				  ml_uint k, ml_uint index_of_feature_to_predict, ml_feature_value &prediction, 
+				  ml_vector<knn_neighbor> *neighbors_considered) {
 
   ml_double continuous_sum = 0;
   ml_uint continuous_count = 0;
@@ -110,14 +111,15 @@ void _knn_predictUsingNeighbors(const ml_vector<knn_neighbor> &all_distances, co
 
 }
 
-bool knn_findNearestNeighborsForInstance(const ml_instance_definition &mlid, const ml_data &mld, const ml_instance &instance, 
-					 ml_uint k, ml_uint index_of_feature_to_predict, ml_feature_value &prediction, ml_vector<knn_neighbor> *neighbors_considered) {
+bool findNearestNeighborsForInstance(const ml_instance_definition &mlid, const ml_data &mld, const ml_instance &instance, 
+				     ml_uint k, ml_uint index_of_feature_to_predict, ml_feature_value &prediction, 
+				     ml_vector<knn_neighbor> *neighbors_considered) {
   
   if(neighbors_considered) {
     neighbors_considered->clear();
   }
 
-  if(!_knn_validateInput(mlid, mld, instance, k, index_of_feature_to_predict)) {
+  if(!validateInput(mlid, mld, instance, k, index_of_feature_to_predict)) {
     return(false);
   }
 
@@ -148,38 +150,41 @@ bool knn_findNearestNeighborsForInstance(const ml_instance_definition &mlid, con
 
   std::sort(all_distances.begin(), all_distances.end());
 
-  _knn_predictUsingNeighbors(all_distances, mlid, k, index_of_feature_to_predict, prediction, neighbors_considered);
+  predictUsingNeighbors(all_distances, mlid, k, index_of_feature_to_predict, prediction, neighbors_considered);
 
   return(true);
 } 
 
-bool knn_printNearestNeighborsResultsForData(const ml_instance_definition &mlid, const ml_data &training,
-					     const ml_data &test, ml_uint k, ml_uint index_of_feature_to_predict) {
+bool printNearestNeighborsResultsForData(const ml_instance_definition &mlid, const ml_data &training,
+					 const ml_data &test, ml_uint k, ml_uint index_of_feature_to_predict) {
   ml_classification_results cr = {};
   ml_regression_results rr = {};
 
   for(std::size_t ii = 0; ii < test.size(); ++ii) {
 
     ml_feature_value prediction;
-    if(!knn_findNearestNeighborsForInstance(mlid, training, *test[ii], k, index_of_feature_to_predict, prediction)) {
+    if(!findNearestNeighborsForInstance(mlid, training, *test[ii], k, index_of_feature_to_predict, prediction)) {
       return(false);
     }
 
     if(mlid[index_of_feature_to_predict].type == ML_FEATURE_TYPE_CONTINUOUS) {
-      ml_collectRegressionResultForInstance(mlid, index_of_feature_to_predict, *test[ii], &prediction, rr);
+      collectRegressionResultForInstance(mlid, index_of_feature_to_predict, *test[ii], &prediction, rr);
     }
     else {
-      ml_collectClassificationResultForInstance(mlid, index_of_feature_to_predict, *test[ii], &prediction, cr);
+      collectClassificationResultForInstance(mlid, index_of_feature_to_predict, *test[ii], &prediction, cr);
     }
   }
 
 
   if(mlid[index_of_feature_to_predict].type == ML_FEATURE_TYPE_CONTINUOUS) {
-    ml_printRegressionResultsSummary(rr);
+    printRegressionResultsSummary(rr);
   }
   else {
-    ml_printClassificationResultsSummary(mlid, index_of_feature_to_predict, cr);
+    printClassificationResultsSummary(mlid, index_of_feature_to_predict, cr);
   }
 
   return(true);
 }
+
+
+} // namespace puml
