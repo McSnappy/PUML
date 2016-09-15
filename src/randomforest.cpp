@@ -25,6 +25,8 @@ SOFTWARE.
 #include <iomanip>
 #include <algorithm>
 #include <pthread.h>
+#include <string.h>
+
 
 #include "randomforest.h"
 #include "mlutil.h"
