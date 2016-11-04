@@ -104,7 +104,7 @@ bool buildBoostedTrees(const ml_instance_definition &mlid, const boosted_build_c
     // it returns false
     //
     if(callback) {
-      if(!callback(mlid, bt, user)) {
+      if(!callback(mlid, bt, ii+1, user)) {
 	break;
       }
     }

@@ -50,7 +50,7 @@ typedef struct {
 //
 // buildBoostedTrees will use the callback after each iteration. return false to stop the build process
 //
-typedef bool (*boostedBuildCallback)(const ml_instance_definition &mlid, const boosted_trees &bt, void *user);
+typedef bool (*boostedBuildCallback)(const ml_instance_definition &mlid, const boosted_trees &bt, ml_uint iteration, void *user);
 
 
 //
@@ -75,7 +75,7 @@ void freeBoostedTrees(boosted_trees &bt);
 // Evaluates the instance over each tree in the ensemble scaled by the shrinkage parameter.
 // Use the continuous_value of the predicted ml_feature_value 
 //
-// returns true on success
+// returns true on success, otherwise false
 //
 bool evaluateBoostedTreesForInstance(const ml_instance_definition &mlid, const boosted_trees &bt, 
 				     const ml_instance &instance, ml_feature_value &prediction);
