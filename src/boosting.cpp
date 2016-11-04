@@ -24,7 +24,6 @@ SOFTWARE.
 #include "mlutil.h"
 
 #include <sstream>
-#include <string.h>
 
 namespace puml {
 
@@ -48,7 +47,8 @@ static void fillDTConfig(dt_build_config &boosted_dtbc, const boosted_build_conf
 
 
 bool buildBoostedTrees(const ml_instance_definition &mlid, const boosted_build_config &bbc,
-		       const ml_mutable_data &mld, boosted_trees &bt) {
+		       const ml_mutable_data &mld, boosted_trees &bt, 
+		       boostedBuildCallback callback, void *user) {
 
   bt.trees.clear();
   bt.learning_rate = bbc.learning_rate;
@@ -96,6 +96,17 @@ bool buildBoostedTrees(const ml_instance_definition &mlid, const boosted_build_c
       const ml_feature_value *predicted = evaluateDecisionTreeForInstance(mlid, boosted_tree, *instance);
       ml_double residual = ml_double(fv.continuous_value) - (bbc.learning_rate * predicted->continuous_value);
       fv.continuous_value = residual;
+    }
+
+    //
+    // if a progress callback was given, exercise
+    // and make this the final boosting iteration if 
+    // it returns false
+    //
+    if(callback) {
+      if(!callback(mlid, bt, user)) {
+	break;
+      }
     }
 
   }

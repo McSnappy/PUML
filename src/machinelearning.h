@@ -156,7 +156,7 @@ typedef ml_vector<ml_instance *> ml_mutable_data;
 // ml_instance_definition -- will be populated with the features defined by the first row
 // ml_data -- will be populated with instance data from the csv
 // 
-// returns true on success, false otherwise
+// returns true on success
 //
 // Instance Definition Row:
 // Name:Type:Optional, for example Feature1:C for a continuous feature, or
@@ -177,7 +177,7 @@ bool loadInstanceDataFromFile(const ml_string &path_to_input_file, ml_instance_d
 // use loadInstanceDataFromFileUsingInstanceDefinition() to force the load of test data 
 // to use category definitions from the training data's ml_instance_definition.
 // 
-// returns true on success, false otherwise.
+// returns true on success
 //
 // ids is an optional parameter that will be populated with the first column of the data file (id column
 // of test data from kaggle competition, etc).

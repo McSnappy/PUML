@@ -48,13 +48,21 @@ typedef struct {
 
 
 //
+// buildBoostedTrees will use the callback after each iteration. return false to stop the build process
+//
+typedef bool (*boostedBuildCallback)(const ml_instance_definition &mlid, const boosted_trees &bt, void *user);
+
+
+//
 // NOTE: Implemented for regression only
 //
 // Build the boosted ensemble given instance definition, training data, and boosted build config. 
-// returns true on success, false otherwise
+// Optional progress callback allows periodic validation scoring and early exit.
+// returns true on success
 //
 bool buildBoostedTrees(const ml_instance_definition &mlid, const boosted_build_config &bbc,
-		       const ml_mutable_data &mld, boosted_trees &bt);
+		       const ml_mutable_data &mld, boosted_trees &bt, 
+		       boostedBuildCallback callback = nullptr, void *user = nullptr);
 
 
 //
@@ -67,7 +75,7 @@ void freeBoostedTrees(boosted_trees &bt);
 // Evaluates the instance over each tree in the ensemble scaled by the shrinkage parameter.
 // Use the continuous_value of the predicted ml_feature_value 
 //
-// returns true on success, otherwise false
+// returns true on success
 //
 bool evaluateBoostedTreesForInstance(const ml_instance_definition &mlid, const boosted_trees &bt, 
 				     const ml_instance &instance, ml_feature_value &prediction);

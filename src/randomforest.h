@@ -54,7 +54,7 @@ typedef struct {
 // oob_for_mld is an optional parameter that will be populated with the out of bag
 // prediction for each instance in the training data.
 //
-// returns true on success, false otherwise
+// returns true on success
 //
 bool buildRandomForest(const ml_instance_definition &mlid, const ml_data &mld, const rf_build_config &rfbc, 
 		       rf_forest &forest, ml_vector<ml_feature_value> *oob_for_mld = nullptr);
@@ -77,7 +77,7 @@ void freeRandomForest(rf_forest &forest);
 // tree_predictions is an optional parameter that will be populated with the predicted ml_feature_value 
 // for the given instance from each tree in the forest.
 //
-// returns true on success, otherwise false
+// returns true on success
 //
 bool evaluateRandomForestForInstance(const ml_instance_definition &mlid, const rf_forest &forest, const ml_instance &instance, 
 				     ml_feature_value &prediction, ml_vector<ml_feature_value> *tree_predictions = nullptr);

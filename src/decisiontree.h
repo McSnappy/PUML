@@ -108,7 +108,7 @@ typedef struct {
 
 //
 // Builds a decision tree given the instance definition, data, and tree build config.  
-// returns true on success, false otherwise.
+// returns true on success
 //
 bool buildDecisionTree(const ml_instance_definition &mlid, const ml_data &mld, const dt_build_config &dtbc, dt_tree &tree);
 
