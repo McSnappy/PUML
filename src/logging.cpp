@@ -35,7 +35,7 @@ void log(const char *format, ... ) {
 
 
 void log_warn(const char *format, ... ) {
-  printf("WARNING --> [%s():%d]  ", __FUNCTION__, __LINE__);
+  printf("WARNING -->  ");
   va_list arglist;
   va_start(arglist, format);
   vprintf(format, arglist);
@@ -45,7 +45,7 @@ void log_warn(const char *format, ... ) {
  
 
 void log_error(const char *format, ... ) {
-  printf("ERROR --> [%s():%d]  ", __FUNCTION__, __LINE__);
+  printf("ERROR --> ");
   va_list arglist;
   va_start(arglist, format);
   vprintf(format, arglist);
