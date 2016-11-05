@@ -895,9 +895,9 @@ static void updateStatsForOneHotEncoding(ml_instance_definition &mlid_ohe, const
 
 }
 
-bool ml_createOneHotEncodingForData(const ml_instance_definition &mlid, const ml_data &mld, 
-				    const ml_string &name_of_feature_to_predict, 
-				    ml_instance_definition &mlid_ohe, ml_data &mld_ohe) {
+bool createOneHotEncodingForData(const ml_instance_definition &mlid, const ml_data &mld, 
+				 const ml_string &name_of_feature_to_predict, 
+				 ml_instance_definition &mlid_ohe, ml_data &mld_ohe) {
 
   mlid_ohe.clear();
   mld_ohe.clear();
