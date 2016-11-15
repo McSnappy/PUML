@@ -32,7 +32,11 @@ typedef struct {
   ml_float learning_rate;
   ml_uint number_of_trees;
   ml_uint index_of_feature_to_predict; // see ml_indexOfFeatureWithName()
+  ml_uint features_to_consider_per_node; // 0 to consider all features
   ml_uint max_tree_depth; // 0 for unlimited
+  ml_uint min_leaf_instances;
+  ml_uint seed;
+  ml_float subsample; // 0.5 to build each tree using 50% of the data randomly sampled
 
 } boosted_build_config;
 

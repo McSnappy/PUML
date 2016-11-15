@@ -34,15 +34,34 @@ const ml_string &BOOSTED_MLID_FILE = "mlid.json";
 static void fillDTConfig(dt_build_config &boosted_dtbc, const boosted_build_config &bbc) {
 
   const ml_uint DEFAULT_BOOSTING_MIN_LEAF_INSTANCES = 2;
-  const ml_uint DEFAULT_BOOSTING_SEED = 333;
-  const ml_uint DEFAULT_BOOSTING_MAX_CONT_FEATURE_SPLITS = 20;
+  const ml_uint DEFAULT_BOOSTING_MAX_CONT_FEATURE_SPLITS = 40;
 
   boosted_dtbc.max_tree_depth = bbc.max_tree_depth;;
-  boosted_dtbc.min_leaf_instances = DEFAULT_BOOSTING_MIN_LEAF_INSTANCES;
+  boosted_dtbc.min_leaf_instances = (bbc.min_leaf_instances == 0) ? DEFAULT_BOOSTING_MIN_LEAF_INSTANCES : bbc.min_leaf_instances;
   boosted_dtbc.max_continuous_feature_splits = DEFAULT_BOOSTING_MAX_CONT_FEATURE_SPLITS;
-  boosted_dtbc.rng_config = createRngConfigWithSeed(DEFAULT_BOOSTING_SEED);
+  boosted_dtbc.rng_config = createRngConfigWithSeed(bbc.seed);
   boosted_dtbc.index_of_feature_to_predict = bbc.index_of_feature_to_predict;
+  boosted_dtbc.features_to_consider_per_node = bbc.features_to_consider_per_node;
 
+}
+
+
+static void sampleWithoutReplacement(const ml_mutable_data &mld, ml_data &mld_iter, ml_float subsample, ml_rng_config *rng_config) {
+
+  mld_iter.clear();
+
+  if(!rng_config) {
+    return;
+  }
+
+  ml_uint thresh = subsample * 100.0;
+  thresh = (thresh == 0) ? 50 : thresh;
+
+  for(std::size_t ii=0; ii < mld.size(); ++ii) {
+    if((generateRandomNumber(rng_config) % 100) < thresh) {
+      mld_iter.push_back(mld[ii]);
+    }
+  }
 }
 
 
@@ -69,7 +88,10 @@ bool buildBoostedTrees(const ml_instance_definition &mlid, const boosted_build_c
   for(ml_uint ii=0; ii < bbc.number_of_trees; ++ii) {
 
     dt_tree boosted_tree = {};
-    ml_data mld_iter(mld.begin(), mld.end());
+
+    ml_data mld_iter;    
+    sampleWithoutReplacement(mld, mld_iter, bbc.subsample, boosted_dtbc.rng_config);
+
     log("\nbuilding boosted tree %u\n", ii+1);
     if(!buildDecisionTree(mlid, mld_iter, boosted_dtbc, boosted_tree)) {
       log_error("failed to build boosted tree...\n");
@@ -119,6 +141,7 @@ bool buildBoostedTrees(const ml_instance_definition &mlid, const boosted_build_c
     (*mld[instance_index])[bbc.index_of_feature_to_predict] = original_target[instance_index];
   }
 
+  delete boosted_dtbc.rng_config;
 
   return(true);
 }

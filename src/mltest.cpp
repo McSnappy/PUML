@@ -89,7 +89,7 @@ int main(int argc, char **argv) {
   rfbc.seed = 999;
   rfbc.max_continuous_feature_splits = 20; // experimental optimization
   rfbc.features_to_consider_per_node = (puml::ml_uint)(sqrt(cover_mlid.size()-1) + 0.5);
- 
+   
   if(!puml::buildRandomForest(cover_mlid, puml::ml_data(cover_training.begin(), cover_training.end()), rfbc, cover_forest)) {
     puml::log_error("failed to build random forest...\n");
     exit(1);
@@ -115,9 +115,9 @@ int main(int argc, char **argv) {
   puml::ml_instance_definition wine_mlid;
   puml::loadInstanceDataFromFile("./winequality-white.csv", wine_mlid, wine_mld);
 
-  // Take 50% for training
+  // Take 90% for training
   puml::ml_mutable_data wine_training, wine_test;
-  puml::splitDataIntoTrainingAndTest(wine_mld, 0.5, rng_config, wine_training, wine_test);
+  puml::splitDataIntoTrainingAndTest(wine_mld, 0.9, rng_config, wine_training, wine_test);
 
   // Build the boosted trees
   puml::boosted_trees bt;
