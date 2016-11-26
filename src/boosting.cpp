@@ -24,6 +24,7 @@ SOFTWARE.
 #include "mlutil.h"
 
 #include <sstream>
+#include <string.h>
 
 namespace puml {
 
