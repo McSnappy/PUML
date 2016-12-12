@@ -233,7 +233,7 @@ static ml_double scoreRegion(const ml_data &mld, const dt_tree &tree) {
   ml_double score = 0.0;
 
   if(tree.type == DT_TREE_TYPE_REGRESSION) {
-    //MSE
+    // residual sum of squares
     ml_double mean = calcMeanForContinuousFeature(tree.index_of_feature_to_predict, mld);
     for(std::size_t ii=0; ii < mld.size(); ++ii) {
       ml_double diff = (*mld[ii])[tree.index_of_feature_to_predict].continuous_value - mean;
