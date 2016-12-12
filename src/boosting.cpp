@@ -55,11 +55,11 @@ static void sampleWithoutReplacement(const ml_mutable_data &mld, ml_data &mld_it
     return;
   }
 
-  ml_uint thresh = subsample * 100.0;
-  thresh = (thresh == 0) ? 50 : thresh;
+  ml_uint thresh = subsample * 10000.0;
+  thresh = (thresh == 0) ? 5000 : thresh;
 
   for(std::size_t ii=0; ii < mld.size(); ++ii) {
-    if((generateRandomNumber(rng_config) % 100) < thresh) {
+    if((generateRandomNumber(rng_config) % 10000) < thresh) {
       mld_iter.push_back(mld[ii]);
     }
   }
