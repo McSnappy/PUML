@@ -850,8 +850,8 @@ static void createOneHotEncodingInstanceDefinition(const ml_instance_definition 
   }
 }
 
-static void createOneHotEncodingForData(const ml_instance_definition &mlid, const ml_data &mld, const ml_string &name_of_feature_to_predict,
-					ml_data &mld_ohe, ml_vector<ml_stats_helper> &stats_helper) {
+static void createOneHotEncodingForData(const ml_instance_definition &mlid, const ml_mutable_data &mld, const ml_string &name_of_feature_to_predict,
+					ml_mutable_data &mld_ohe, ml_vector<ml_stats_helper> &stats_helper) {
   //
   // convert the instances to the new one hot encoded format
   //
@@ -895,9 +895,9 @@ static void updateStatsForOneHotEncoding(ml_instance_definition &mlid_ohe, const
 
 }
 
-bool createOneHotEncodingForData(const ml_instance_definition &mlid, const ml_data &mld, 
+bool createOneHotEncodingForData(const ml_instance_definition &mlid, const ml_mutable_data &mld, 
 				 const ml_string &name_of_feature_to_predict, 
-				 ml_instance_definition &mlid_ohe, ml_data &mld_ohe) {
+				 ml_instance_definition &mlid_ohe, ml_mutable_data &mld_ohe) {
 
   mlid_ohe.clear();
   mld_ohe.clear();

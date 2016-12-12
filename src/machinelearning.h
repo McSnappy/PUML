@@ -217,9 +217,9 @@ ml_uint indexOfFeatureWithName(const ml_string &feature_name, const ml_instance_
 //
 // One Hot Encoding: Converts discrete (categorical) features to continuous binary features
 //
-bool createOneHotEncodingForData(const ml_instance_definition &mlid, const ml_data &mld, 
+bool createOneHotEncodingForData(const ml_instance_definition &mlid, const ml_mutable_data &mld, 
 				 const ml_string &name_of_feature_to_predict, 
-				 ml_instance_definition &mlid_ohe, ml_data &mld_ohe);
+				 ml_instance_definition &mlid_ohe, ml_mutable_data &mld_ohe);
 
 
 //
