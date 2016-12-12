@@ -26,7 +26,7 @@ Load Data:
     // ml_instance_definition -- will be populated with the features defined by the first row
     // ml_data -- will be populated with instance data from the csv
     //
-    // returns true on success, false otherwise
+    // returns true on success
     //
     // Instance Definition Row:
     // Name:Type:Optional, for example Feature1:C for a continuous feature, or
