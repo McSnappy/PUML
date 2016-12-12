@@ -22,6 +22,7 @@ SOFTWARE.
 
 #include "mlutil.h"
 #include <sstream>
+#include <ctime>
 #include <sys/stat.h>
 #include <dirent.h>
 
