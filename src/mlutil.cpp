@@ -21,6 +21,7 @@ SOFTWARE.
 */
 
 #include "mlutil.h"
+#include <sstream>
 #include <sys/stat.h>
 #include <dirent.h>
 
@@ -35,7 +36,7 @@ bool prepareDirectoryForModelSave(const ml_string &path_to_dir,
     return(false);
   }
   
-  // clear the directory if it already exists and we are allowed to overwrite.
+  // move the directory if it already exists and we are allowed to overwrite.
   struct stat info;
   if((stat(path_to_dir.c_str(), &info) == 0) && (info.st_mode & S_IFDIR)) {
     
@@ -43,21 +44,23 @@ bool prepareDirectoryForModelSave(const ml_string &path_to_dir,
       log_error("directory exists and we aren't allowed to overwrite\n");
       return(false);
     }
-    
-    ml_string rm_cmd = ml_string("rm -f ") + path_to_dir + "/*.json";
-    if(system(rm_cmd.c_str())){
-      log_error("couldn't clear model files from directory: %s\n", path_to_dir.c_str());
+
+    std::time_t timestamp = std::time(0);    
+    std::ostringstream ss;
+    ss << "mv " << path_to_dir << " " << path_to_dir << "." << timestamp;
+    if(system(ss.str().c_str())){
+      log_error("couldn't replace previous model directory: %s\n", path_to_dir.c_str());
       return(false);
     }
   }
-  else {
-    // the directory doesn't exist so we will create it.
-    if(mkdir(path_to_dir.c_str(), 0755)) {
-      log_error("couldn't create model save directory: %s\n", path_to_dir.c_str());
-      perror("ERROR --> mkdir");
-      return(false);
-    }
+
+  // create the model save directory 
+  if(mkdir(path_to_dir.c_str(), 0755)) {
+    log_error("couldn't create model save directory: %s\n", path_to_dir.c_str());
+    perror("ERROR --> mkdir");
+    return(false);
   }
+  
   
   return(true);
 }
