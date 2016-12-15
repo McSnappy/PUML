@@ -21,6 +21,8 @@ SOFTWARE.
 */
 
 #include "kmeans.h"
+#include <algorithm>
+#include <string.h>
 
 
 namespace puml {
