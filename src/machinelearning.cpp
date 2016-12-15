@@ -37,6 +37,8 @@ SOFTWARE.
 namespace puml {
 
 const ml_float ML_VERSION = 0.1; 
+const ml_string ML_UNKNOWN_DISCRETE_CATEGORY = "<unknown>";
+
 
 //
 // one per feature, used for online avg/variance calc 
@@ -175,8 +177,6 @@ static void addDiscreteValueToFeatureDesc(const ml_string &value, int index, ml_
 }
 
 static ml_uint findDiscreteValueIndexForValue(const ml_string &value, ml_feature_desc &mlfd) {
-
-  const ml_string &ML_UNKNOWN_DISCRETE_CATEGORY = "<unknown>";
 
   // Index 0 always represents the unknown/unavailable category
   if(mlfd.discrete_values.size() == 0) {

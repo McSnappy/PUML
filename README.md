@@ -2,7 +2,7 @@
 Poor Unwashed Machine Learner
 -----------------------------
 
-A simple-headed C++ implementation of Decision Trees, Random Forest, Boosted Trees, and kNN for classification and regression. 
+A simple-headed C++ implementation of Decision Trees, Random Forest, Boosted Trees, kNN, and k-means.
 
 The included sample program, mltest, uses the [Iris](https://archive.ics.uci.edu/ml/datasets/Iris ""), [Covertype](https://archive.ics.uci.edu/ml/datasets/Covertype ""), and [Wine Quality](https://archive.ics.uci.edu/ml/datasets/Wine+Quality "") datasets from UCI to demonstrate building trees and forests.  
 

@@ -266,6 +266,8 @@ void printRegressionResultsSummary(const ml_regression_results &mlrr);
 bool writeModelJSONToFile(const ml_string &path_to_file, cJSON *json_object);
 cJSON *readModelJSONFromFile(const ml_string &path_to_file);
 
+extern const ml_string ML_UNKNOWN_DISCRETE_CATEGORY;
+
 } // namespace puml
 
 #endif
