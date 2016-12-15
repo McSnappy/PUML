@@ -22,6 +22,7 @@ SOFTWARE.
 
 #include "kmeans.h"
 #include <algorithm>
+#include <chrono>
 #include <string.h>
 
 
@@ -214,7 +215,7 @@ bool clusterBykMeans(ml_uint k, ml_uint seed, const ml_instance_definition &mlid
   }
   
   result.rss = std::numeric_limits<ml_double>::max();
-  
+  auto t1 = std::chrono::high_resolution_clock::now();
   for(int ii=0; ii < KMEANS_TRIALS; ++ii) {
     kmeans_result trial = {};
     if(!_clusterBykMeans(k, seed+ii, mlid, mld, feature_weights, trial, mld_cluster_ids)) {
@@ -227,7 +228,11 @@ bool clusterBykMeans(ml_uint k, ml_uint seed, const ml_instance_definition &mlid
       result = trial;
     }
   }
-  
+
+  auto t2 = std::chrono::high_resolution_clock::now();
+  ml_uint ms = std::chrono::duration_cast<std::chrono::milliseconds>(t2-t1).count();
+  log("k-means clustering took %.3f seconds (%u clusters, %u instances)\n", (ms / 1000.0), k, mld.size()); 
+
   return(true);
 }
 
