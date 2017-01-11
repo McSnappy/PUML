@@ -27,6 +27,26 @@ SOFTWARE.
 #include "boosting.h"
 
 
+puml::ml_double ae_loss(puml::ml_double yi, puml::ml_double yhat) {
+  puml::ml_double diff = yi - yhat;
+  return(fabs(diff));
+}
+
+
+puml::ml_double ae_gradient(puml::ml_double yi, puml::ml_double yhat) {
+  puml::ml_double diff = yi - yhat;
+
+  if(diff < 0.0) {
+    diff = -1.0;
+  }
+  else if(diff > 0.0) {
+    diff = 1.0;
+  }
+
+  return(diff);
+}
+
+
 int main(int argc, char **argv) {
 
   //
@@ -115,17 +135,21 @@ int main(int argc, char **argv) {
   puml::ml_instance_definition wine_mlid;
   puml::loadInstanceDataFromFile("./winequality-white.csv", wine_mlid, wine_mld);
 
-  // Take 90% for training
+  // Take 80% for training
   puml::ml_mutable_data wine_training, wine_test;
-  puml::splitDataIntoTrainingAndTest(wine_mld, 0.9, rng_config, wine_training, wine_test);
+  puml::splitDataIntoTrainingAndTest(wine_mld, 0.8, rng_config, wine_training, wine_test);
 
   // Build the boosted trees
   puml::boosted_trees bt;
   puml::boosted_build_config bbc = {};
   bbc.learning_rate = 0.1;
+  bbc.subsample = 0.9;
   bbc.number_of_trees = 100;
-  bbc.max_tree_depth = 6;
+  bbc.max_tree_depth = 8;
+  bbc.seed = 42;
   bbc.index_of_feature_to_predict = puml::indexOfFeatureWithName("quality", wine_mlid);
+  bbc.lossFunc = ae_loss;
+  bbc.gradientFunc = ae_gradient;
   puml::buildBoostedTrees(wine_mlid, bbc, wine_training, bt);
 
   // Show the results using the holdout data

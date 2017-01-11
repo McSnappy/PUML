@@ -67,6 +67,8 @@ typedef struct dt_node {
   dt_comparison_operator split_right_op;    
   struct dt_node *split_right_node;
   
+  ml_data leaf_instances;
+
 } dt_node;
 
 
@@ -74,7 +76,7 @@ typedef struct {
 
   ml_uint index_of_feature_to_predict; // see ml_indexOfFeatureWithName()
   ml_uint min_leaf_instances; 
-  ml_uint max_tree_depth; // 0 for unlimited 
+  ml_uint max_tree_depth; 
 
   ml_uint max_continuous_feature_splits; // 0 to consider all splits. Otherwise,
                                          // take a random sample of possible splits
@@ -83,6 +85,8 @@ typedef struct {
   ml_uint features_to_consider_per_node; // 0 to consider all features
   ml_rng_config *rng_config; // used for random feature selection. can be nil
 
+  bool keep_instances_at_leaf_nodes; // keep a copy of the instances at each leaf node 
+                                     // (leaf_instances in dt_node, used during boosting)
 } dt_build_config;
 
 

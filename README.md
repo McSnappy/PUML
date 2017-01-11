@@ -6,7 +6,7 @@ A simple-headed C++ implementation of Decision Trees, Random Forest, Boosted Tre
 
 The included sample program, mltest, uses the [Iris](https://archive.ics.uci.edu/ml/datasets/Iris ""), [Covertype](https://archive.ics.uci.edu/ml/datasets/Covertype ""), and [Wine Quality](https://archive.ics.uci.edu/ml/datasets/Wine+Quality "") datasets from UCI to demonstrate building trees and forests.  
 
-PUML uses Dave Gamble's [cJSON](https://github.com/DaveGamble/cJSON "Title") to read/write its models.
+PUML uses Dave Gamble's [cJSON](https://github.com/DaveGamble/cJSON "cJSON") (MIT) to read/write its models, and John Burkardt's implementation of Brent's Method [BRENT](https://people.sc.fsu.edu/~jburkardt/c_src/brent/brent.html "BRENT") (LGPL).
   
   
 Build and run mltest:

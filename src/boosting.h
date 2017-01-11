@@ -27,16 +27,23 @@ SOFTWARE.
 
 namespace puml {
 
+typedef ml_double (*boostedLossFunc)(ml_double yi, ml_double yhat);
+typedef ml_double (*boostedGradientFunc)(ml_double yi, ml_double yhat);
+
 typedef struct {
 
   ml_float learning_rate;
   ml_uint number_of_trees;
   ml_uint index_of_feature_to_predict; // see ml_indexOfFeatureWithName()
   ml_uint features_to_consider_per_node; // 0 to consider all features
-  ml_uint max_tree_depth; // 0 for unlimited
+  ml_uint max_tree_depth; 
   ml_uint min_leaf_instances;
-  ml_uint seed;
+  ml_uint seed; // 0 to seed using the clock
   ml_float subsample; // 0.5 to build each tree using 50% of the data randomly sampled
+
+  // loss defaults to squared error unless overridden
+  boostedLossFunc lossFunc; 
+  boostedGradientFunc gradientFunc;
 
 } boosted_build_config;
 
@@ -52,7 +59,7 @@ typedef struct {
 
 
 //
-// buildBoostedTrees will use the callback after each iteration. return false to stop the build process
+// buildBoostedTrees will use the callback after each iteration. return false to stop building trees
 //
 typedef bool (*boostedBuildCallback)(const ml_instance_definition &mlid, const boosted_trees &bt, ml_uint iteration, void *user);
 

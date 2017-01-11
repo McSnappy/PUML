@@ -14,8 +14,10 @@ debug: CXXFLAGS += -g -DDEBUG=1
 debug: clean mltest
 
 mltest:
-	$(CXX) $(CXXFLAGS) -I . mltest.cpp machinelearning.cpp mlutil.cpp logging.cpp knn.cpp kmeans.cpp decisiontree.cpp randomforest.cpp boosting.cpp cJSON/cJSON.cpp -o mltest -lpthread
+	$(CXX) $(CXXFLAGS) -fPIC -rdynamic -shared -x c++ brent/brent.c -o libpumlbrent.so
+	$(CXX) $(CXXFLAGS) -L . mltest.cpp machinelearning.cpp mlutil.cpp logging.cpp knn.cpp kmeans.cpp decisiontree.cpp randomforest.cpp boosting.cpp cJSON/cJSON.cpp -o mltest -lpumlbrent -lpthread
 
 clean: 
+	rm -f ./libpumlbrent.so
 	rm -f ./mltest
 	rm -rf ./mltest.dSYM

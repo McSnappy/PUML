@@ -58,7 +58,7 @@ static bool validateInput(const ml_instance_definition &mlid, const ml_data &mld
     return(false);
   }
 
-  if(mlid.size() != (*mld[0]).size()) {
+  if(mld[0]->size() < mlid.size()) {
     log_error("feature count mismatch b/t instance definition and instance data\n");
     return(false);
   }
@@ -368,6 +368,11 @@ static void configLeafNode(const ml_instance_definition &mlid, const ml_data &ml
   else {
     leaf->feature_value.discrete_value_index = calcModeValueIndexForDiscreteFeature(leaf->feature_index, mld);
   }
+
+  if(dtbc.keep_instances_at_leaf_nodes) {
+    leaf->leaf_instances = mld;
+  }
+
 }
 
 static void configSplitNode(const dt_split &split, dt_node *split_node) {
@@ -417,7 +422,7 @@ static void buildTreeNode(const ml_instance_definition &mlid, const ml_data &mld
 
   tree.nodes += 1;
 
-  if((dtbc.max_tree_depth > 0) && (depth == dtbc.max_tree_depth)) {
+  if(depth == dtbc.max_tree_depth) {
     configLeafNode(mlid, mld, dtbc, tree, *node);
     return;
   }
@@ -551,7 +556,7 @@ static const ml_feature_value *evaluateDecisionTreeNodeForInstance(const dt_node
 
 const ml_feature_value *evaluateDecisionTreeForInstance(const ml_instance_definition &mlid, const dt_tree &tree, const ml_instance &instance) {
   
-  if(instance.size() != mlid.size()) {
+  if(instance.size() < mlid.size()) {
     log_error("feature count mismatch b/t instance definition and instance to evaluate\n");
     return(nullptr);
   }

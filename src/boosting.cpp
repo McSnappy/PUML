@@ -22,6 +22,7 @@ SOFTWARE.
 
 #include "boosting.h"
 #include "mlutil.h"
+#include "brent/brent.h"
 
 #include <sstream>
 #include <string.h>
@@ -43,7 +44,7 @@ static void fillDTConfig(dt_build_config &boosted_dtbc, const boosted_build_conf
   boosted_dtbc.rng_config = createRngConfigWithSeed(bbc.seed);
   boosted_dtbc.index_of_feature_to_predict = bbc.index_of_feature_to_predict;
   boosted_dtbc.features_to_consider_per_node = bbc.features_to_consider_per_node;
-
+  boosted_dtbc.keep_instances_at_leaf_nodes = true;
 }
 
 
@@ -66,6 +67,89 @@ static void sampleWithoutReplacement(const ml_mutable_data &mld, ml_data &mld_it
 }
 
 
+typedef struct {
+
+  ml_data *instances;
+  const ml_instance_definition *mlid;
+  boostedLossFunc lossFunc; 
+
+} leaf_opt_helper;
+
+static double leaf_optimization(double x, void *user) {
+
+  leaf_opt_helper *help = (leaf_opt_helper *) user;
+
+  double loss = 0.0;
+
+  for(std::size_t ii = 0; ii < help->instances->size(); ++ii) {
+    const ml_instance *instance = (*help->instances)[ii];
+    double yi = (*instance)[help->mlid->size()].continuous_value;
+    double yhat = (*instance)[help->mlid->size() + 1].continuous_value + x;
+
+    if(help->lossFunc) {
+      loss += help->lossFunc(yi, yhat);
+    }
+  }
+
+  return(loss);
+}
+
+static void _gatherLeafNodes(ml_vector<dt_node *> &leaf_nodes, dt_node *node) {
+  if(node->node_type == DT_NODE_TYPE_LEAF) {
+    leaf_nodes.push_back(node);
+    return;
+  }
+
+  if(node->split_left_node) {
+    _gatherLeafNodes(leaf_nodes, node->split_left_node);
+  }
+
+  if(node->split_right_node) {
+    _gatherLeafNodes(leaf_nodes, node->split_right_node);
+  }
+}
+
+static void gatherLeafNodes(ml_vector<dt_node *> &leaf_nodes, dt_tree &tree) {
+
+  leaf_nodes.clear();
+  _gatherLeafNodes(leaf_nodes, tree.root);
+}
+
+static void optimizeLeafNodes(const ml_instance_definition &mlid, const boosted_build_config &bbc, const boosted_trees &bt, dt_tree &tree) {
+
+  if(!bbc.lossFunc) {
+    return;
+  }
+
+  ml_vector<dt_node *> leaf_nodes;
+  gatherLeafNodes(leaf_nodes, tree);
+
+  double eps = sqrt(r8_epsilon());
+
+  for(std::size_t ii=0; ii < leaf_nodes.size(); ++ii) {
+    dt_node *leaf = leaf_nodes[ii];
+
+    leaf_opt_helper help;
+    help.instances = &leaf->leaf_instances;
+    help.mlid = &mlid;
+    help.lossFunc = bbc.lossFunc;
+
+    double optimal = 0.0;
+    double upper = leaf->feature_value.continuous_value * 100.0;
+    double lower = upper * -1.0;
+    if(lower > upper) {
+      std::swap(lower, upper);
+    }
+
+    //puml::log("optimize: leaf before %.3f, ", leaf->feature_value.continuous_value);
+    local_min(lower, upper, eps, eps, leaf_optimization, &help, &optimal);
+    leaf->feature_value.continuous_value = optimal;
+    //puml::log(" after %.3f\n", leaf->feature_value.continuous_value);
+    leaf->leaf_instances.clear();
+    leaf->leaf_instances.shrink_to_fit();
+  }
+}
+
 bool buildBoostedTrees(const ml_instance_definition &mlid, const boosted_build_config &bbc,
 		       const ml_mutable_data &mld, boosted_trees &bt, 
 		       boostedBuildCallback callback, void *user) {
@@ -83,15 +167,34 @@ bool buildBoostedTrees(const ml_instance_definition &mlid, const boosted_build_c
   dt_build_config boosted_dtbc = {};
   fillDTConfig(boosted_dtbc, bbc);
 
-  ml_vector<ml_feature_value> original_target;
-  original_target.reserve(mld.size());
+  //
+  // store the original target value as an unused
+  // feature at the end of each instance, and
+  // the boosted ensemble prediction after that.
+  //
+  for(std::size_t jj=0; jj < mld.size(); ++jj) {
+    ml_instance &instance = *mld[jj];
+    ml_feature_value &fv = instance[boosted_dtbc.index_of_feature_to_predict];
+    instance.push_back(fv);
 
+    ml_feature_value ensemble = {};
+    instance.push_back(ensemble);
+  }
+
+  //
+  // build the ensemble. early stopping via callback
+  //
   for(ml_uint ii=0; ii < bbc.number_of_trees; ++ii) {
 
     dt_tree boosted_tree = {};
 
-    ml_data mld_iter;    
+    ml_data mld_iter;   
     sampleWithoutReplacement(mld, mld_iter, bbc.subsample, boosted_dtbc.rng_config);
+
+    //
+    // start with the optimal constant model
+    //
+    boosted_dtbc.max_tree_depth = (ii == 0) ? 0 : bbc.max_tree_depth; 
 
     log("\nbuilding boosted tree %u\n", ii+1);
     if(!buildDecisionTree(mlid, mld_iter, boosted_dtbc, boosted_tree)) {
@@ -99,26 +202,38 @@ bool buildBoostedTrees(const ml_instance_definition &mlid, const boosted_build_c
       return(false);
     }
 
-    //printDecisionTreeSummary(mlid, boosted_tree);
+    //
+    // use custom loss function if available. defaults to squared error loss
+    //
+    if(bbc.lossFunc) {
+      optimizeLeafNodes(mlid, bbc, bt, boosted_tree);
+    }
+
     bt.trees.push_back(boosted_tree);
 
     //
-    // update the feature to predict with the residual
+    // update the residual
     //
     for(std::size_t jj=0; jj < mld.size(); ++jj) {
-      ml_instance *instance = mld[jj];
-      ml_feature_value &fv = (*instance)[boosted_tree.index_of_feature_to_predict];
-    
-      //
-      // store the original target value on the first iteration
-      //
-      if(ii == 0) {
-	original_target.push_back(fv);
-      }
 
-      const ml_feature_value *predicted = evaluateDecisionTreeForInstance(mlid, boosted_tree, *instance);
-      ml_double residual = ml_double(fv.continuous_value) - (bbc.learning_rate * predicted->continuous_value);
-      fv.continuous_value = residual;
+      ml_instance &instance = *mld[jj];
+      ml_feature_value &residual = instance[boosted_tree.index_of_feature_to_predict];
+      ml_double yi = instance[mlid.size()].continuous_value;
+
+      const ml_feature_value *pred = evaluateDecisionTreeForInstance(mlid, boosted_tree, instance);
+      instance[mlid.size() + 1].continuous_value += (ii == 0) ? pred->continuous_value : (bt.learning_rate * pred->continuous_value);
+      ml_double yhat = instance[mlid.size() + 1].continuous_value;
+
+      //
+      // use custom gradient function if available, otherwise squared error gradient
+      //
+      if(bbc.gradientFunc) {
+	residual.continuous_value = bbc.gradientFunc(yi, yhat);
+      }
+      else {
+	residual.continuous_value = yi - yhat;
+      }
+     
     }
 
     //
@@ -136,10 +251,14 @@ bool buildBoostedTrees(const ml_instance_definition &mlid, const boosted_build_c
 
 
   //
-  // restore the original target value
+  // restore the original target value, and
+  // remove the temp feature added to the end 
+  // of each instance
   //
   for(std::size_t instance_index=0; instance_index < mld.size(); ++instance_index) {
-    (*mld[instance_index])[bbc.index_of_feature_to_predict] = original_target[instance_index];
+    ml_instance &instance = *mld[instance_index];
+    instance[bbc.index_of_feature_to_predict] = instance[mlid.size()];
+    instance.resize(mlid.size());
   }
 
   delete boosted_dtbc.rng_config;
@@ -167,7 +286,12 @@ bool evaluateBoostedTreesForInstance(const ml_instance_definition &mlid, const b
   ml_double ensemble_prediction = 0;
   for(std::size_t bb = 0; bb < bt.trees.size(); ++bb) {
     const ml_feature_value *tree_prediction = evaluateDecisionTreeForInstance(mlid, bt.trees[bb], instance);
-    ensemble_prediction += (bt.learning_rate * tree_prediction->continuous_value);
+    if(bb == 0) { // first tree in the ensemble is the optimal constant model, a single terminal node
+      ensemble_prediction += tree_prediction->continuous_value;
+    }
+    else {
+      ensemble_prediction += (bt.learning_rate * tree_prediction->continuous_value);
+    }
   }
 
   prediction.continuous_value = ensemble_prediction;
