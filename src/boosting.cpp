@@ -117,10 +117,6 @@ static void gatherLeafNodes(ml_vector<dt_node *> &leaf_nodes, dt_tree &tree) {
 
 static void optimizeLeafNodes(const ml_instance_definition &mlid, const boosted_build_config &bbc, const boosted_trees &bt, dt_tree &tree) {
 
-  if(!bbc.lossFunc) {
-    return;
-  }
-
   ml_vector<dt_node *> leaf_nodes;
   gatherLeafNodes(leaf_nodes, tree);
 
@@ -129,22 +125,29 @@ static void optimizeLeafNodes(const ml_instance_definition &mlid, const boosted_
   for(std::size_t ii=0; ii < leaf_nodes.size(); ++ii) {
     dt_node *leaf = leaf_nodes[ii];
 
-    leaf_opt_helper help;
-    help.instances = &leaf->leaf_instances;
-    help.mlid = &mlid;
-    help.lossFunc = bbc.lossFunc;
-
-    double optimal = 0.0;
-    double upper = leaf->feature_value.continuous_value * 100.0;
-    double lower = upper * -1.0;
-    if(lower > upper) {
-      std::swap(lower, upper);
+    //
+    // use custom loss function if given, otherwise defaults to squared error loss
+    //
+    if(bbc.lossFunc) {
+      leaf_opt_helper help;
+      help.instances = &leaf->leaf_instances;
+      help.mlid = &mlid;
+      help.lossFunc = bbc.lossFunc;
+      
+      double optimal = 0.0;
+      double upper = leaf->feature_value.continuous_value * 100.0;
+      double lower = upper * -1.0;
+      if(lower > upper) {
+	std::swap(lower, upper);
+      }
+      
+      //puml::log("optimize: leaf before %.3f, ", leaf->feature_value.continuous_value);
+      local_min(lower, upper, eps, eps, leaf_optimization, &help, &optimal);
+      leaf->feature_value.continuous_value = optimal;
+      //puml::log(" after %.3f\n", leaf->feature_value.continuous_value);
     }
 
-    //puml::log("optimize: leaf before %.3f, ", leaf->feature_value.continuous_value);
-    local_min(lower, upper, eps, eps, leaf_optimization, &help, &optimal);
-    leaf->feature_value.continuous_value = optimal;
-    //puml::log(" after %.3f\n", leaf->feature_value.continuous_value);
+    // empty the leaf instances vector. we only kept them around for this optimization step
     leaf->leaf_instances.clear();
     leaf->leaf_instances.shrink_to_fit();
   }
@@ -202,13 +205,7 @@ bool buildBoostedTrees(const ml_instance_definition &mlid, const boosted_build_c
       return(false);
     }
 
-    //
-    // use custom loss function if available. defaults to squared error loss
-    //
-    if(bbc.lossFunc) {
-      optimizeLeafNodes(mlid, bbc, bt, boosted_tree);
-    }
-
+    optimizeLeafNodes(mlid, bbc, bt, boosted_tree);
     bt.trees.push_back(boosted_tree);
 
     //
@@ -225,7 +222,7 @@ bool buildBoostedTrees(const ml_instance_definition &mlid, const boosted_build_c
       ml_double yhat = instance[mlid.size() + 1].continuous_value;
 
       //
-      // use custom gradient function if available, otherwise squared error gradient
+      // use custom gradient function if given, otherwise squared error gradient
       //
       if(bbc.gradientFunc) {
 	residual.continuous_value = bbc.gradientFunc(yi, yhat);
@@ -252,7 +249,7 @@ bool buildBoostedTrees(const ml_instance_definition &mlid, const boosted_build_c
 
   //
   // restore the original target value, and
-  // remove the temp feature added to the end 
+  // remove the temp features added to the end 
   // of each instance
   //
   for(std::size_t instance_index=0; instance_index < mld.size(); ++instance_index) {
