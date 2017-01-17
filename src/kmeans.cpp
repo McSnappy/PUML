@@ -176,12 +176,12 @@ static void assignClusterIds(const ml_instance_definition &mlid, const ml_data &
 
 static bool _clusterBykMeans(ml_uint k, ml_uint seed, const ml_instance_definition &mlid, const ml_data &mld, 
 			     const ml_vector<ml_float> &feature_weights, kmeans_result &result,
-			     ml_vector<ml_uint> *mld_cluster_ids) {
+			     ml_vector<ml_uint> &cluster_ids) {
 
   initkMeansResult(k, mlid, feature_weights, result);
 
   ml_rng_config *rng_config = createRngConfigWithSeed(seed);
-  ml_vector<ml_uint> cluster_ids(mld.size());
+  cluster_ids.resize(mld.size());
   initClusterIds(k, rng_config, cluster_ids);
 
   const ml_uint MAX_KMEANS_ITER = 10;
@@ -192,10 +192,6 @@ static bool _clusterBykMeans(ml_uint k, ml_uint seed, const ml_instance_definiti
   }
   
   delete rng_config;
-
-  if(mld_cluster_ids) {
-    *mld_cluster_ids = cluster_ids;
-  }
 
   return(true);
 }
@@ -218,13 +214,17 @@ bool clusterBykMeans(ml_uint k, ml_uint seed, const ml_instance_definition &mlid
   auto t1 = std::chrono::high_resolution_clock::now();
   for(int ii=0; ii < KMEANS_TRIALS; ++ii) {
     kmeans_result trial = {};
-    if(!_clusterBykMeans(k, seed+ii, mlid, mld, feature_weights, trial, mld_cluster_ids)) {
+    ml_vector<ml_uint> cluster_ids;
+    if(!_clusterBykMeans(k, seed+ii, mlid, mld, feature_weights, trial, cluster_ids)) {
       return(false);
     }
 
     //puml::log("kmeans rss = %.3f\n", trial.rss);
 
     if(trial.rss < result.rss) {
+      if(mld_cluster_ids) {
+	*mld_cluster_ids = cluster_ids;
+      } 
       result = trial;
     }
   }
