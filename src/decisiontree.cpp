@@ -174,7 +174,7 @@ static void addSplitsForDiscreteFeature(const ml_feature_desc &mlfd, ml_uint fea
   std::size_t end_index = (mlfd.discrete_values.size() == 3) ? 2 : mlfd.discrete_values.size(); 
   
   for(std::size_t ii=(mlfd.preserve_missing ? 0 : 1); ii < end_index; ++ii) { // 0 index is the <unknown> category
-    dt_split dsplit;
+    dt_split dsplit = {};
     dsplit.split_feature_index = feature_index;
     dsplit.split_feature_type = ML_FEATURE_TYPE_DISCRETE;
     dsplit.split_feature_value.discrete_value_index = ii;
@@ -203,7 +203,7 @@ static void addSplitsForContinuousFeature(const ml_feature_desc &mlfd, ml_uint f
       continue;
     }
 
-    dt_split csplit;
+    dt_split csplit = {};
     csplit.split_feature_index = feature_index;
     csplit.split_feature_type = ML_FEATURE_TYPE_CONTINUOUS;
     csplit.split_feature_value.continuous_value = (column[ii] + column[ii+1]) / 2.0;
@@ -427,7 +427,7 @@ static void buildTreeNode(const ml_instance_definition &mlid, const ml_data &mld
     return;
   }
   
-  dt_split best_split;
+  dt_split best_split = {};
   ml_data leftmld, rightmld;
 
   if(findBestSplit(mlid, mld, dtbc, tree, best_split, score)) {
