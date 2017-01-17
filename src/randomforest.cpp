@@ -35,7 +35,7 @@ namespace puml {
 
 typedef std::set<ml_uint> rf_oob_indices;
 
-const ml_uint RF_MIN_LEAF_INSTANCES = 2;
+const ml_uint RF_DEFAULT_MIN_LEAF_INSTANCES = 2;
 const ml_string &RF_BASEINFO_FILE = "rf.json";
 const ml_string &RF_MLID_FILE = "mlid.json";
 
@@ -154,7 +154,7 @@ static void fillDTConfig(const rf_build_config &rfbc, const ml_instance_definiti
   dtbc.index_of_feature_to_predict = rfbc.index_of_feature_to_predict;
   dtbc.max_tree_depth = rfbc.max_tree_depth;
   dtbc.rng_config = createRngConfigWithSeed(rfbc.seed + thread_index);
-  dtbc.min_leaf_instances = RF_MIN_LEAF_INSTANCES;
+  dtbc.min_leaf_instances = (rfbc.min_leaf_instances == 0) ? RF_DEFAULT_MIN_LEAF_INSTANCES : rfbc.min_leaf_instances;
   dtbc.max_continuous_feature_splits = rfbc.max_continuous_feature_splits;
   dtbc.features_to_consider_per_node = rfbc.features_to_consider_per_node; 
 }

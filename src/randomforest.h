@@ -32,6 +32,7 @@ typedef struct {
   ml_uint number_of_threads; 
   ml_uint number_of_trees;
   ml_uint index_of_feature_to_predict; // see ml_indexOfFeatureWithName()
+  ml_uint min_leaf_instances;
   ml_uint max_tree_depth; 
   ml_uint max_continuous_feature_splits; // 0 to consider all splits [experimental, see decisiontree.h]
   ml_uint features_to_consider_per_node; // 0 to consider all features
