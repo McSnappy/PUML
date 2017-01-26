@@ -237,7 +237,15 @@ static bool processInstanceFeatures(ml_instance_definition &mlid, ml_mutable_dat
       //
       // Convert from string and update the online mean/variance calculation.
       //
-      mlfv.continuous_value = stof(features_as_string[str_index]);
+      try {
+	mlfv.continuous_value = stof(features_as_string[str_index]);
+      }
+      catch(...) {
+	puml::log_error("non-numeric value: '%s' given for continuous feature '%s'\n",
+		       features_as_string[str_index].c_str(), mlid[feature_index].name.c_str());
+	return(false);
+      }
+
       updateStatsHelperWithFeatureValue(stats_helper[feature_index], mlfv);
     }
     else { 
