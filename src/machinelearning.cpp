@@ -38,7 +38,7 @@ namespace puml {
 
 const ml_float ML_VERSION = 0.1; 
 const ml_string ML_UNKNOWN_DISCRETE_CATEGORY = "<unknown>";
-
+const ml_float MISSING_CONTINUOUS_FEATURE_VALUE = std::numeric_limits<ml_float>::lowest();
 
 //
 // one per feature, used for online avg/variance calc 
@@ -311,7 +311,7 @@ static void fillMissingInstanceFeatureValues(ml_instance_definition &mlid, ml_mu
       ml_uint instance_index = stats_helper[findex].missing_data_instance_indices[jj];
       ml_instance &instance = (*mld[instance_index]);
       if(mlid[findex].type == ML_FEATURE_TYPE_CONTINUOUS) {
-	instance[findex].continuous_value = mlid[findex].preserve_missing ? std::numeric_limits<ml_float>::lowest() : mlid[findex].mean;
+	instance[findex].continuous_value = mlid[findex].preserve_missing ? MISSING_CONTINUOUS_FEATURE_VALUE : mlid[findex].mean;
 	//log("setting missing cont feature %zu of instance %d to %.3f\n", findex, instance_index, instance[findex].continuous_value); 
       }
       else {

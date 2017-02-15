@@ -53,6 +53,7 @@ typedef uint32_t ml_uint;
 typedef std::string ml_string;
 
 extern const ml_float ML_VERSION; 
+extern const ml_float MISSING_CONTINUOUS_FEATURE_VALUE;
 
 template <typename T>
 using ml_vector = std::vector<T>;

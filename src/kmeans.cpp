@@ -113,7 +113,8 @@ static void updateCentroids(const ml_instance_definition &mlid, const ml_data &m
     result.clusters[cluster_id].instances += 1;
 
     for(std::size_t feature_id=0; feature_id < feature_weights.size(); ++feature_id) {
-      if(feature_weights[feature_id] > 0.0) {
+      if((feature_weights[feature_id] > 0.0) &&
+	 (inst[feature_id].continuous_value != MISSING_CONTINUOUS_FEATURE_VALUE)) {
 	result.clusters[cluster_id].centroid[feature_id] += (mlid[feature_id].sd > 0.0) ? ((inst[feature_id].continuous_value - mlid[feature_id].mean) / mlid[feature_id].sd) : 0.0;
       }
     }
@@ -133,14 +134,15 @@ static ml_uint _clusterIdForInstance(const ml_instance_definition &mlid, const m
 
   // return the cluster id of the cluster centroid closest to the instance
   distsq = std::numeric_limits<ml_double>::max();
-  ml_uint nearest_cluster_id = 0;
+  ml_uint nearest_cluster_id = 1; // cluster ids from 1 to k
 
   for(std::size_t cluster_id=0; cluster_id < result.clusters.size(); ++cluster_id) {
 
     ml_double centroid_dist = 0;
     for(std::size_t feature_id=0; feature_id < result.feature_weights.size(); ++feature_id) {
       
-      if(result.feature_weights[feature_id] > 0.0) {
+      if((result.feature_weights[feature_id] > 0.0) &&
+	 (instance[feature_id].continuous_value != MISSING_CONTINUOUS_FEATURE_VALUE)) {
 	ml_double norm_feature = (mlid[feature_id].sd > 0) ? ((instance[feature_id].continuous_value - mlid[feature_id].mean) / mlid[feature_id].sd) : 0.0;
 	ml_double feature_dist = result.clusters[cluster_id].centroid[feature_id] - norm_feature;
 	centroid_dist += (result.feature_weights[feature_id] * (feature_dist * feature_dist));
