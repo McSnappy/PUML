@@ -24,9 +24,8 @@ SOFTWARE.
 #include <set>
 #include <iomanip>
 #include <algorithm>
-#include <pthread.h>
+#include <thread>
 #include <string.h>
-
 
 #include "randomforest.h"
 #include "mlutil.h"
@@ -38,6 +37,24 @@ typedef std::set<ml_uint> rf_oob_indices;
 const ml_uint RF_DEFAULT_MIN_LEAF_INSTANCES = 2;
 const ml_string &RF_BASEINFO_FILE = "rf.json";
 const ml_string &RF_MLID_FILE = "mlid.json";
+
+struct rf_thread_config {
+
+  rf_thread_config(ml_uint tindex, ml_uint ntrees, const dt_build_config &dtconfig,
+		   const ml_data &data, const ml_instance_definition &def) :
+    thread_index(tindex), number_of_trees(ntrees), dtbc(dtconfig), mld(data), mlid(def) {}
+
+  ml_uint thread_index;
+  ml_uint number_of_trees;
+  dt_build_config dtbc;
+  const ml_data &mld;
+  const ml_instance_definition &mlid;
+
+  ml_vector<rf_oob_indices> oobs;
+  ml_vector<dt_tree> trees;
+};
+
+using rf_thread_config_ptr = std::shared_ptr<rf_thread_config>;
 
 
 static void initOutOfBagIndices(ml_uint size, rf_oob_indices &oob) {
@@ -150,7 +167,7 @@ static void printFeatureImportance(const ml_instance_definition &mlid, ml_uint i
 
 }
 
-static void fillDTConfig(const rf_build_config &rfbc, const ml_instance_definition &mlid, ml_uint thread_index, dt_build_config &dtbc) {
+static void fillDTConfig(const rf_build_config &rfbc, ml_uint thread_index, dt_build_config &dtbc) {
   dtbc.index_of_feature_to_predict = rfbc.index_of_feature_to_predict;
   dtbc.max_tree_depth = rfbc.max_tree_depth;
   dtbc.rng_config = createRngConfigWithSeed(rfbc.seed + thread_index);
@@ -162,7 +179,7 @@ static void fillDTConfig(const rf_build_config &rfbc, const ml_instance_definiti
 static bool singleThreaded_buildRandomForest(const rf_build_config &rfbc, const ml_instance_definition &mlid, const ml_data &mld, rf_forest &forest, 
 					     ml_vector<rf_oob_indices> &oobs, ml_vector<dt_feature_importance> &forest_feature_importance) {
   dt_build_config dtbc = {};
-  fillDTConfig(rfbc, mlid, 0, dtbc);
+  fillDTConfig(rfbc, 0, dtbc);
 
   for(ml_uint ii=0; ii < rfbc.number_of_trees; ++ii) {
     
@@ -189,26 +206,8 @@ static bool singleThreaded_buildRandomForest(const rf_build_config &rfbc, const 
 }
 
 
-const ml_uint RF_MAX_THREADS = 20;
-
-typedef struct {
-
-  pthread_t thread;
-  ml_uint thread_index;
-  ml_uint number_of_trees;
-  dt_build_config dtbc;
-  ml_vector<rf_oob_indices> oobs;
-  ml_vector<dt_tree> trees;
-
-  const ml_data *mld;
-  const ml_instance_definition *mlid;
-
-} rf_thread_config;
-
-static void *multiThreaded_buildTree(void *config) {
+static void multiThreaded_buildTree(rf_thread_config_ptr rftc) {
   
-  rf_thread_config *rftc = (rf_thread_config *) config;
-
   std::ostringstream ss;
   ss << "[thread " << rftc->thread_index << "]";
   ml_string thread_name = ss.str();
@@ -217,71 +216,69 @@ static void *multiThreaded_buildTree(void *config) {
     ml_data bootstrapped;
     rf_oob_indices oob;
     
-    bootstrappedSampleFromData(*(rftc->mld), rftc->dtbc.rng_config, bootstrapped, oob);
+    bootstrappedSampleFromData(rftc->mld, rftc->dtbc.rng_config, bootstrapped, oob);
     
     log("%s building tree %d...\n", thread_name.c_str(), ii+1);
     
     dt_tree tree;
     tree.name = thread_name;
-    if(!buildDecisionTree(*(rftc->mlid), bootstrapped, rftc->dtbc, tree)) {
+    if(!buildDecisionTree(rftc->mlid, bootstrapped, rftc->dtbc, tree)) {
       log_error("failed to build decision tree %d-%d...\n", rftc->thread_index, ii+1);
-      return(nullptr);
+      return;
     }
     
     rftc->oobs.push_back(oob);
     rftc->trees.push_back(tree);
   }
 
-  return(nullptr);
+  return;
 }
 
 static bool multiThreaded_buildRandomForest(const rf_build_config &rfbc, const ml_instance_definition &mlid, const ml_data &mld, rf_forest &forest, 
 					  ml_vector<rf_oob_indices> &oobs, ml_vector<dt_feature_importance> &forest_feature_importance) {
-
-  if(rfbc.number_of_threads > RF_MAX_THREADS) {
-    log_error("requested # of threads (%u) exceeds max supported (%u)\n", rfbc.number_of_threads, RF_MAX_THREADS);
-    return(false);
-  }
 
   if(rfbc.number_of_threads > rfbc.number_of_trees) {
     log_error("requested # of threads (%u) is greater than # of trees (%u)\n", rfbc.number_of_threads, rfbc.number_of_trees);
     return(false);
   }
 
-  rf_thread_config thread_config[RF_MAX_THREADS];
+  ml_vector<std::thread> work_threads;
+  ml_vector<rf_thread_config_ptr> thread_configs;
 
-  // init the dt_build_config, and other inputs for each thread
+  // init thread input (# trees to build, custom seed, etc) and spawn the threads
   for(ml_uint thread_index = 0; thread_index < rfbc.number_of_threads; ++thread_index) {
-    thread_config[thread_index].thread_index = thread_index;
-    thread_config[thread_index].mld = &mld;
-    thread_config[thread_index].mlid = &mlid;
-    thread_config[thread_index].number_of_trees = (rfbc.number_of_trees / rfbc.number_of_threads);
-    thread_config[thread_index].number_of_trees += (thread_index == 0) ? (rfbc.number_of_trees % rfbc.number_of_threads) : 0;
-    fillDTConfig(rfbc, mlid, thread_index, thread_config[thread_index].dtbc);
+    
+    dt_build_config dtbc = {};
+    fillDTConfig(rfbc, thread_index, dtbc);
+
+    ml_uint ntrees = (rfbc.number_of_trees / rfbc.number_of_threads);
+    ntrees += (thread_index == 0) ? (rfbc.number_of_trees % rfbc.number_of_threads) : 0;
+
+    auto rftc = std::make_shared<rf_thread_config>(thread_index, ntrees, dtbc, mld, mlid);
+    std::thread wthread([rftc] { multiThreaded_buildTree(rftc); });
+    thread_configs.push_back(rftc);
+    work_threads.push_back(std::move(wthread));
   }
 
-  // spawn threads 
-  for(ml_uint thread_index = 0; thread_index < rfbc.number_of_threads; ++thread_index) {
-    pthread_create(&thread_config[thread_index].thread, nullptr, multiThreaded_buildTree, &thread_config[thread_index]);
-  }
 
   // wait for all threads to finish
-  for(ml_uint thread_index = 0; thread_index < rfbc.number_of_threads; ++thread_index) {
-    pthread_join(thread_config[thread_index].thread, nullptr);
+  for(auto iter=work_threads.begin(); iter != work_threads.end(); ++iter) {
+    (*iter).join();
   }
 						
   // combine trees, out of bag maps, and feature importance
-  for(ml_uint thread_index = 0; thread_index < rfbc.number_of_threads; ++thread_index) {
+  for(auto iter=thread_configs.cbegin(); iter != thread_configs.cend(); ++iter) {
 
-    if(thread_config[thread_index].trees.size() != thread_config[thread_index].number_of_trees) {
-      log_error("some trees failed to build in thread %d\n", thread_index);
+    auto thread_config = *iter;
+    if(thread_config->trees.size() != thread_config->number_of_trees) {
+      log_error("some trees failed to build in thread %d\n", thread_config->thread_index);
       return(false);
     }
 
-    for(ml_uint tree_index = 0; tree_index < thread_config[thread_index].number_of_trees; ++tree_index) {
-      oobs.push_back(thread_config[thread_index].oobs[tree_index]);
-      forest.trees.push_back(thread_config[thread_index].trees[tree_index]);
-      collectFeatureImportance(thread_config[thread_index].trees[tree_index].feature_importance, forest_feature_importance);
+    for(ml_uint tree_index = 0; tree_index < thread_config->number_of_trees; ++tree_index) {
+      oobs.push_back(thread_config->oobs[tree_index]);
+      forest.trees.push_back(thread_config->trees[tree_index]);
+      collectFeatureImportance(thread_config->trees[tree_index].feature_importance, forest_feature_importance);
     }
 
   }
@@ -323,7 +320,7 @@ static bool evaluateClassificationRandomForestForInstance(const ml_instance_defi
 							  const ml_instance &instance, ml_feature_value &prediction, 
 							  ml_vector<ml_feature_value> *tree_predictions) {
 
-  if(forest.trees.size() == 0) {
+  if(forest.trees.empty()) {
     return(false);
   }
 
@@ -361,7 +358,7 @@ static bool evaluateClassificationRandomForestForInstance(const ml_instance_defi
 static bool evaluateRegressionRandomForestForInstance(const ml_instance_definition &mlid, const rf_forest &forest, const ml_instance &instance, 
 						      ml_feature_value &prediction, ml_vector<ml_feature_value> *tree_predictions) {
 
-  if(forest.trees.size() == 0) {
+  if(forest.trees.empty()) {
     return(false);
   }
 
