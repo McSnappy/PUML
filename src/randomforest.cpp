@@ -255,9 +255,8 @@ static bool multiThreaded_buildRandomForest(const rf_build_config &rfbc, const m
     ntrees += (thread_index == 0) ? (rfbc.number_of_trees % rfbc.number_of_threads) : 0;
 
     auto rftc = std::make_shared<rf_thread_config>(thread_index, ntrees, dtbc, mld, mlid);
-    std::thread wthread([rftc] { multiThreaded_buildTree(rftc); });
     thread_configs.push_back(rftc);
-    work_threads.push_back(std::move(wthread));
+    work_threads.emplace_back(std::thread([rftc] { multiThreaded_buildTree(rftc); }));
   }
 
 
