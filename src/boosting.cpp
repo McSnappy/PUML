@@ -67,13 +67,13 @@ static void sampleWithoutReplacement(const ml_mutable_data &mld, ml_data &mld_it
 }
 
 
-typedef struct {
+struct leaf_opt_helper {
 
   ml_data *instances;
   const ml_instance_definition *mlid;
   boostedLossFunc lossFunc; 
 
-} leaf_opt_helper;
+};
 
 static double leaf_optimization(double x, void *user) {
 
@@ -94,7 +94,7 @@ static double leaf_optimization(double x, void *user) {
   return(loss);
 }
 
-static void _gatherLeafNodes(ml_vector<dt_node *> &leaf_nodes, dt_node *node) {
+static void _gatherLeafNodes(ml_vector<dt_node_ptr> &leaf_nodes, dt_node_ptr &node) {
   if(node->node_type == DT_NODE_TYPE_LEAF) {
     leaf_nodes.push_back(node);
     return;
@@ -109,7 +109,7 @@ static void _gatherLeafNodes(ml_vector<dt_node *> &leaf_nodes, dt_node *node) {
   }
 }
 
-static void gatherLeafNodes(ml_vector<dt_node *> &leaf_nodes, dt_tree &tree) {
+static void gatherLeafNodes(ml_vector<dt_node_ptr> &leaf_nodes, dt_tree &tree) {
 
   leaf_nodes.clear();
   _gatherLeafNodes(leaf_nodes, tree.root);
@@ -117,13 +117,13 @@ static void gatherLeafNodes(ml_vector<dt_node *> &leaf_nodes, dt_tree &tree) {
 
 static void optimizeLeafNodes(const ml_instance_definition &mlid, const boosted_build_config &bbc, const boosted_trees &bt, dt_tree &tree) {
 
-  ml_vector<dt_node *> leaf_nodes;
+  ml_vector<dt_node_ptr> leaf_nodes;
   gatherLeafNodes(leaf_nodes, tree);
 
   double eps = sqrt(r8_epsilon());
 
   for(std::size_t ii=0; ii < leaf_nodes.size(); ++ii) {
-    dt_node *leaf = leaf_nodes[ii];
+    dt_node_ptr leaf = leaf_nodes[ii];
 
     //
     // use custom loss function if given, otherwise defaults to squared error loss
@@ -261,15 +261,6 @@ bool buildBoostedTrees(const ml_instance_definition &mlid, const boosted_build_c
   delete boosted_dtbc.rng_config;
 
   return(true);
-}
-
-
-void freeBoostedTrees(boosted_trees &bt) {
-  for(std::size_t ii = 0; ii < bt.trees.size(); ++ii) {
-    freeDecisionTree(bt.trees[ii]);
-  }
-
-  bt.trees.clear();
 }
 
 

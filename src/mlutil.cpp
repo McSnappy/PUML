@@ -86,7 +86,7 @@ bool readDecisionTreesFromDirectory(const ml_string &path_to_dir,
     }
     
     ml_string full_path = path_to_dir + "/" + dir->d_name;
-    dt_tree tree = {};
+    dt_tree tree;
     if(!readDecisionTreeFromFile(full_path, tree)) {
       log_error("failed to parse tree from json: %s\n", full_path.c_str());
       return(false);

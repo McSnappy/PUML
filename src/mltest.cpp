@@ -74,7 +74,7 @@ int main(int argc, char **argv) {
     puml::log_error("failed to build tree...\n");
     exit(1);
   }
-
+  
   // Show the tree
   puml::printDecisionTreeSummary(iris_mlid, iris_tree);
 
@@ -84,7 +84,6 @@ int main(int argc, char **argv) {
   // Release resources
   puml::freeInstanceData(iris_training);
   puml::freeInstanceData(iris_test);
-  puml::freeDecisionTree(iris_tree);
 
 
   //
@@ -124,9 +123,8 @@ int main(int argc, char **argv) {
   // Release resources
   puml::freeInstanceData(cover_training);
   puml::freeInstanceData(cover_test);
-  puml::freeRandomForest(cover_forest);
   
-
+ 
   //
   // Boosted Regression Trees example
   //
@@ -161,8 +159,6 @@ int main(int argc, char **argv) {
   // Release resources
   puml::freeInstanceData(wine_training);
   puml::freeInstanceData(wine_test);
-  puml::freeBoostedTrees(bt);
   
-
   return(0);
 }

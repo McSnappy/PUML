@@ -77,12 +77,6 @@ bool buildBoostedTrees(const ml_instance_definition &mlid, const boosted_build_c
 
 
 //
-// Release memory and clear the boosted trees structure
-//
-void freeBoostedTrees(boosted_trees &bt);
-
-
-//
 // Evaluates the instance over each tree in the ensemble scaled by the shrinkage parameter.
 // Use the continuous_value of the predicted ml_feature_value 
 //

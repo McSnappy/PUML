@@ -197,8 +197,8 @@ static bool singleThreaded_buildRandomForest(const rf_build_config &rfbc, const 
     }
 
     oobs.push_back(oob);
-    forest.trees.push_back(tree);
     collectFeatureImportance(tree.feature_importance, forest_feature_importance);
+    forest.trees.push_back(tree);
 
   }
 
@@ -540,15 +540,6 @@ bool readRandomForestFromDirectory(const ml_string &path_to_dir, ml_instance_def
   readDecisionTreesFromDirectory(path_to_dir, forest.trees);
 
   return(true);
-}
-
-void freeRandomForest(rf_forest &forest) {
-  for(std::size_t ii = 0; ii < forest.trees.size(); ++ii) {
-    freeDecisionTree(forest.trees[ii]);
-  }
-
-  forest.trees.clear();
-  forest.index_of_feature_to_predict = 0;
 }
 
 

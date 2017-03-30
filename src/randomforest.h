@@ -61,11 +61,6 @@ bool buildRandomForest(const ml_instance_definition &mlid, const ml_data &mld, c
 		       rf_forest &forest, ml_vector<ml_feature_value> *oob_for_mld = nullptr);
 
 
-//
-// Release memory and clear the forest structure
-//
-void freeRandomForest(rf_forest &forest);
-
 
 //
 // Evaluates the instance over each tree in the forest and returns the average for regression, 

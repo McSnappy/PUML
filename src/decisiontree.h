@@ -23,6 +23,7 @@ SOFTWARE.
 #ifndef __DECISION_TREE_H__
 #define __DECISION_TREE_H__
 
+#include <iostream>
 #include "machinelearning.h"
 
 namespace puml {
@@ -54,22 +55,25 @@ typedef enum {
 } dt_comparison_operator;
 
 
-typedef struct dt_node {
+struct dt_node;
+using dt_node_ptr = std::shared_ptr<dt_node>;
+
+struct dt_node {
 
   dt_node_type node_type;
   ml_uint feature_index;
   ml_feature_type feature_type;
-  ml_feature_value feature_value;
+  ml_feature_value feature_value = {};
 
   dt_comparison_operator split_left_op;    
-  struct dt_node *split_left_node;
+  dt_node_ptr split_left_node = nullptr;
 
   dt_comparison_operator split_right_op;    
-  struct dt_node *split_right_node;
+  dt_node_ptr split_right_node = nullptr;
   
   ml_data leaf_instances;
 
-} dt_node;
+};
 
 
 typedef struct {
@@ -100,9 +104,9 @@ typedef struct {
 
   ml_uint index_of_feature_to_predict;
   dt_tree_type type;
-  ml_uint nodes;
-  ml_uint leaves;
-  dt_node *root;
+  ml_uint nodes = 0;
+  ml_uint leaves = 0;
+  dt_node_ptr root = nullptr;
 
   ml_string name;
   ml_vector<dt_feature_importance> feature_importance;
@@ -126,15 +130,9 @@ bool buildDecisionTree(const ml_instance_definition &mlid, const ml_data &mld, c
 // discrete_value_index to the actual categorical name (use tree.index_of_feature_to_predict to get the index of the ml_feature_desc
 // from the ml_instance_definition. The ml_feature_desc has a vector of category names, discrete_values. Use discrete_values[discrete_value_index]).
 //
-// The tree owns the resources for the returned ml_feature_value, which will be released with a call to freeDecisionTree()
+// The tree owns the resources for the returned ml_feature_value
 //
 const ml_feature_value *evaluateDecisionTreeForInstance(const ml_instance_definition &mlid, const dt_tree &tree, const ml_instance &instance);
-
-
-//
-// Release memory and clear the tree structure
-//
-void freeDecisionTree(dt_tree &tree);
 
 
 //
