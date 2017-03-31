@@ -70,7 +70,7 @@ int main(int argc, char **argv) {
   dtbc.max_tree_depth = 6;
   dtbc.min_leaf_instances = 2;
   dtbc.index_of_feature_to_predict = indexOfFeatureWithName("Class", iris_mlid);
-  if(!puml::buildDecisionTree(iris_mlid, puml::ml_data(iris_training.begin(), iris_training.end()), dtbc, iris_tree)) {
+  if(!puml::buildDecisionTree(iris_mlid, iris_training, dtbc, iris_tree)) {
     puml::log_error("failed to build tree...\n");
     exit(1);
   }
@@ -79,7 +79,7 @@ int main(int argc, char **argv) {
   puml::printDecisionTreeSummary(iris_mlid, iris_tree);
 
   // Show the results over the hold out data
-  puml::printDecisionTreeResultsForData(iris_mlid, puml::ml_data(iris_test.begin(), iris_test.end()), iris_tree);
+  puml::printDecisionTreeResultsForData(iris_mlid, iris_test, iris_tree);
 
 
   //
@@ -105,13 +105,13 @@ int main(int argc, char **argv) {
   rfbc.max_continuous_feature_splits = 20; // experimental optimization
   rfbc.features_to_consider_per_node = (puml::ml_uint)(sqrt(cover_mlid.size()-1) + 0.5);
    
-  if(!puml::buildRandomForest(cover_mlid, puml::ml_data(cover_training.begin(), cover_training.end()), rfbc, cover_forest)) {
+  if(!puml::buildRandomForest(cover_mlid, cover_training, rfbc, cover_forest)) {
     puml::log_error("failed to build random forest...\n");
     exit(1);
   }
 
   // Show results of forest for the hold out
-  puml::printRandomForestResultsForData(cover_mlid, puml::ml_data(cover_test.begin(), cover_test.end()), cover_forest);
+  puml::printRandomForestResultsForData(cover_mlid, cover_test, cover_forest);
 
   // Save the model to disk
   puml::writeRandomForestToDirectory("/tmp/rf-cover", cover_mlid, cover_forest);
@@ -143,7 +143,7 @@ int main(int argc, char **argv) {
   puml::buildBoostedTrees(wine_mlid, bbc, wine_training, bt);
 
   // Show the results using the holdout data
-  puml::printBoostedTreesResultsForData(wine_mlid, puml::ml_data(wine_test.begin(), wine_test.end()), bt);
+  puml::printBoostedTreesResultsForData(wine_mlid, wine_test, bt);
 
   // Store the model 
   puml::writeBoostedTreesToDirectory("/tmp/boosted_test", wine_mlid, bt);
