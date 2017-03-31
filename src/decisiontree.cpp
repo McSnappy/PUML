@@ -32,28 +32,28 @@ SOFTWARE.
 
 namespace puml {
 
-typedef struct {
+struct dt_split {
   ml_uint split_feature_index;
   ml_feature_type split_feature_type;
   ml_feature_value split_feature_value;
-  dt_comparison_operator split_left_op;
-  dt_comparison_operator split_right_op;
-  ml_double left_score;
-  ml_double right_score;
-} dt_split;
+  dt_comparison_operator split_left_op = DT_COMPARISON_OP_NOOP;
+  dt_comparison_operator split_right_op = DT_COMPARISON_OP_NOOP;
+  ml_double left_score = 0;
+  ml_double right_score = 0;
+};
 
 
-#define DT_COMPARISON_EQUAL_TOL 0.00000001
 
+static const ml_double DT_COMPARISON_EQUAL_TOL = 0.00000001;
 
 static bool validateInput(const ml_instance_definition &mlid, const ml_data &mld, const dt_build_config &dtbc) {
 
-  if(mlid.size() == 0) {
+  if(mlid.empty()) {
     log_error("empty instance definition...\n");
     return(false);
   }
 
-  if(mld.size() == 0) {
+  if(mld.empty()) {
     log_error("empty instance data set...\n");
     return(false);
   }
@@ -141,7 +141,7 @@ static bool instanceSatisfiesLeftConstraintOfSplit(const ml_instance &instance, 
     log_error("invalid split feature index: %d. exiting\n", split_feature_index); 
     exit(1);
   }
-  
+   
   const ml_feature_value &mlfv = instance[split_feature_index];
 
   switch(split_feature_type) {
@@ -224,38 +224,116 @@ static void addSplitsForContinuousFeature(const ml_feature_desc &mlfd, ml_uint f
 
 }
 
-static ml_double scoreRegion(const ml_data &mld, const dt_tree &tree) {
 
-  if(mld.size() == 0) {
-    return(0.0);
+//
+// score regions for regression using residual sum of squares (approx)
+// returns a tuple with (left region score, right region score, combined score)
+//
+static std::tuple<ml_double, ml_double, ml_double> scoreRegionsWithSplitForRegression(const ml_data &mld, const dt_split &split, const dt_tree &tree) {
+
+  ml_double lscore = 0, rscore = 0, combined_score = 0;
+  ml_uint n_left = 0, n_right = 0;
+  ml_double mean_left = 0, mean_right = 0;
+  
+  for(auto ii=0; ii < mld.size(); ++ii) {
+    
+    ml_double feature_val = (*mld[ii])[tree.index_of_feature_to_predict].continuous_value;
+    
+    if((split.split_left_op == DT_COMPARISON_OP_NOOP) || 
+       instanceSatisfiesLeftConstraintOfSplit(*mld[ii], split.split_feature_index, 
+					      split.split_feature_type, split.split_feature_value,
+					      split.split_left_op)) {
+      ++n_left;
+      ml_double delta = feature_val - mean_left;
+      mean_left = mean_left + (delta / n_left);
+      lscore = lscore + (delta * (feature_val - mean_left));
+    }
+    else {
+      ++n_right;
+      ml_double delta = feature_val - mean_right;
+      mean_right = mean_right + (delta / n_right);
+      rscore = rscore + (delta * (feature_val - mean_right));
+    }
+    
+  }
+
+  combined_score = lscore + rscore;
+
+  return(std::make_tuple(lscore, rscore, combined_score));
+}
+
+
+//
+// score regions for classification using Gini index
+// returns a tuple with (left region score, right region score, combined score)
+//
+static std::tuple<ml_double, ml_double, ml_double> scoreRegionsWithSplitForClassification(const ml_data &mld, const dt_split &split, const dt_tree &tree) {
+
+  ml_double lscore = 0, rscore = 0, combined_score = 0;
+  ml_map<ml_uint, ml_uint> left_value_map;
+  ml_map<ml_uint, ml_uint> right_value_map;
+  ml_uint lcount=0, rcount=0;
+  
+  for(auto ii=0; ii < mld.size(); ++ii) {
+    
+    ml_uint discrete_value_index = (*mld[ii])[tree.index_of_feature_to_predict].discrete_value_index;
+    
+    if((split.split_left_op == DT_COMPARISON_OP_NOOP) || 
+       instanceSatisfiesLeftConstraintOfSplit(*mld[ii], split.split_feature_index, 
+					      split.split_feature_type, split.split_feature_value,
+					      split.split_left_op)) {
+      left_value_map[discrete_value_index] += 1;
+      ++lcount;
+    }
+    else {
+      right_value_map[discrete_value_index] += 1;
+      ++rcount;
+    }
+    
   }
   
-  ml_double score = 0.0;
+  for(auto it = left_value_map.begin(); it != left_value_map.end(); ++it) {
+    ml_double class_proportion = ((ml_double) it->second / lcount);
+    lscore += (class_proportion * (1.0 - class_proportion));
+  }
+  
+  for(auto it = right_value_map.begin(); it != right_value_map.end(); ++it) {
+    ml_double class_proportion = ((ml_double) it->second / rcount);
+    rscore += (class_proportion * (1.0 - class_proportion));
+  }
+  
+  combined_score = (((ml_double) lcount / mld.size()) * lscore) + (((ml_double) rcount / mld.size()) * rscore);
+  return(std::make_tuple(lscore, rscore, combined_score));
+}
 
+
+//
+// score the regions created by subdividing mld using split.
+// returns a tuple with (left region score, right region score, combined score)
+//
+static std::tuple<ml_double, ml_double, ml_double> scoreRegionsWithSplit(const ml_data &mld, const dt_split &split, const dt_tree &tree) {
+
+  if(mld.empty()) {
+    return(std::make_tuple(0.0, 0.0, 0.0));
+  }
+  
   if(tree.type == DT_TREE_TYPE_REGRESSION) {
-    // residual sum of squares
-    ml_double mean = calcMeanForContinuousFeature(tree.index_of_feature_to_predict, mld);
-    for(std::size_t ii=0; ii < mld.size(); ++ii) {
-      ml_double diff = (*mld[ii])[tree.index_of_feature_to_predict].continuous_value - mean;
-      score += (diff * diff);
-    }
-
+    return(scoreRegionsWithSplitForRegression(mld, split, tree));
   }
   else {
-    //Gini Index
-    ml_map<ml_uint, ml_uint> value_map;
-    for(std::size_t ii=0; ii < mld.size(); ++ii) {
-      ml_uint discrete_value_index = (*mld[ii])[tree.index_of_feature_to_predict].discrete_value_index;
-      value_map[discrete_value_index] += 1;
-    }
-
-    for(ml_map<ml_uint, ml_uint>::iterator it = value_map.begin(); it != value_map.end(); ++it) {
-      ml_double class_proportion = ((ml_double) it->second / mld.size());
-      score += (class_proportion * (1.0 - class_proportion));
-    }
+    return(scoreRegionsWithSplitForClassification(mld, split, tree));
   }
 
-  return(score);
+}
+
+
+//
+// score undivided mld using empty noop split
+//
+static ml_double scoreRegion(const ml_data &mld, const dt_tree &tree) {
+  ml_double lscore=0, rscore=0, combined_score=0;
+  std::tie(lscore, rscore, combined_score) = scoreRegionsWithSplit(mld, dt_split{}, tree);
+  return(combined_score);
 }
 
 static void pickRandomFeaturesToConsider(const ml_instance_definition &mlid, const dt_build_config &dtbc, ml_map<ml_uint, bool> &random_features) {
@@ -321,16 +399,9 @@ static bool findBestSplit(const ml_instance_definition &mlid, const ml_data &mld
   best_score = best_left_score = best_right_score = std::numeric_limits<ml_double>::max();
 
   for(std::size_t ii = 0; ii < splits.size(); ++ii) {
-
-    ml_data leftmld, rightmld;
-    performSplit(mld, splits[ii], leftmld, rightmld);
     
-    ml_double lscore = scoreRegion(leftmld, tree);
-    ml_double rscore = scoreRegion(rightmld, tree);
-    ml_double combined_score = lscore + rscore;
-    if(tree.type == DT_TREE_TYPE_CLASSIFICATION) {
-      combined_score = (((ml_double) leftmld.size() / mld.size()) * lscore) + (((ml_double) rightmld.size() / mld.size()) * rscore);
-    }
+    ml_double lscore=0, rscore=0, combined_score=0;
+    std::tie(lscore, rscore, combined_score) = scoreRegionsWithSplit(mld, splits[ii], tree);
 
     if(combined_score < best_score) {
       best_score = combined_score;

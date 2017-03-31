@@ -25,7 +25,7 @@ SOFTWARE.
 
 #include <stdint.h>
 #include <vector>
-#include <map>
+#include <unordered_map>
 #include <string>
 #include <random>
 
@@ -59,7 +59,7 @@ template <typename T>
 using ml_vector = std::vector<T>;
 
 template <typename T, typename T2>
-using ml_map = std::map<T, T2>;
+using ml_map = std::unordered_map<T, T2>;
 
 
 //
