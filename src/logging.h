@@ -20,8 +20,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-#ifndef __LOGGING_H__
-#define __LOGGING_H__
+#pragma once
 
 #include <stdio.h>
 
@@ -33,4 +32,3 @@ namespace puml {
 
 } 
 
-#endif

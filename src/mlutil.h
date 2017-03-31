@@ -20,8 +20,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-#ifndef __MLUTIL_H__
-#define __MLUTIL_H__
+#pragma once
 
 #include "machinelearning.h"
 #include "decisiontree.h"
@@ -38,4 +37,4 @@ namespace puml {
 
 }
 
-#endif
+

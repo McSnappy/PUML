@@ -20,8 +20,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-#ifndef __RANDOM_FOREST_H__
-#define __RANDOM_FOREST_H__
+#pragma once
 
 #include "decisiontree.h"
 
@@ -96,7 +95,7 @@ bool readRandomForestFromDirectory(const ml_string &path_to_dir, ml_instance_def
 
 } // namespace puml
 
-#endif
+
 
 
 

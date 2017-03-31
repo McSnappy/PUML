@@ -20,8 +20,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-#ifndef __MACHINE_LEARNING_H__
-#define __MACHINE_LEARNING_H__
+#pragma once
 
 #include <stdint.h>
 #include <vector>
@@ -275,6 +274,6 @@ extern const ml_string ML_UNKNOWN_DISCRETE_CATEGORY;
 
 } // namespace puml
 
-#endif
+
 
 

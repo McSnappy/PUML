@@ -20,8 +20,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-#ifndef __DECISION_TREE_H__
-#define __DECISION_TREE_H__
+#pragma once
 
 #include <iostream>
 #include "machinelearning.h"
@@ -156,7 +155,7 @@ bool readDecisionTreeFromFile(const ml_string &path_to_file, dt_tree &tree);
 
 } // namespace puml
 
-#endif
+
 
 
 

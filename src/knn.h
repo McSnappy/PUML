@@ -20,8 +20,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-#ifndef __KNN_H__
-#define __KNN_H__
+#pragma once
 
 #include "machinelearning.h"
 
@@ -38,5 +37,3 @@ namespace puml {
 
 } 
 
-
-#endif

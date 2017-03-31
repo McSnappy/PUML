@@ -20,8 +20,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-#ifndef __BOOSTING_H__
-#define __BOOSTING_H__
+#pragma once
 
 #include "decisiontree.h"
 
@@ -104,7 +103,7 @@ bool readBoostedTreesFromDirectory(const ml_string &path_to_dir, ml_instance_def
 
 } // namespace puml
 
-#endif
+
 
 
 
