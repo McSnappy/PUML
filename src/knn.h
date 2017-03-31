@@ -27,7 +27,7 @@ SOFTWARE.
 
 namespace puml {
 
-  typedef std::pair<ml_double, const ml_instance *> knn_neighbor; // distance and the instance 
+  typedef std::pair<ml_double, ml_instance_ptr> knn_neighbor; // distance and the instance 
   
   bool findNearestNeighborsForInstance(const ml_instance_definition &mlid, const ml_data &mld, const ml_instance &instance, 
 				       ml_uint k, ml_uint index_of_feature_to_predict, ml_feature_value &prediction, 

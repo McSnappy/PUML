@@ -204,7 +204,7 @@ static void updateStatsHelperWithFeatureValue(ml_stats_helper &stats_helper, con
   stats_helper.M2 = stats_helper.M2 + (delta * (mlfv.continuous_value - stats_helper.mean));
 }
 
-static bool processInstanceFeatures(ml_instance_definition &mlid, ml_mutable_data &mld, const ml_vector<ml_string> &features_as_string, 
+static bool processInstanceFeatures(ml_instance_definition &mlid, ml_data &mld, const ml_vector<ml_string> &features_as_string, 
 				    ml_vector<ml_stats_helper> &stats_helper, const ml_map<ml_uint, bool> &ignored_features) {  
 
   if(features_as_string.size() != (mlid.size() + ignored_features.size())) {
@@ -213,7 +213,7 @@ static bool processInstanceFeatures(ml_instance_definition &mlid, ml_mutable_dat
     return(false);
   }    
 
-  ml_instance *mli = new ml_instance;
+  ml_instance_ptr mli = std::make_shared<ml_instance>();
   ml_uint feature_index = 0;
 
   mli->reserve(mlid.size());
@@ -282,7 +282,7 @@ static void findModeValueIndexForDiscreteFeature(ml_feature_desc &mlfd) {
   mlfd.discrete_mode_index = mindex;
 }
 
-static void calcMeanOrModeOfFeatures(ml_instance_definition &mlid, ml_mutable_data &mld, ml_vector<ml_stats_helper> &stats_helper) {
+static void calcMeanOrModeOfFeatures(ml_instance_definition &mlid, ml_data &mld, ml_vector<ml_stats_helper> &stats_helper) {
   //
   // iterate over all features and compute the mean/std for continuous, and find the mode for discrete features.
   //
@@ -301,7 +301,7 @@ static void calcMeanOrModeOfFeatures(ml_instance_definition &mlid, ml_mutable_da
   }
 }
 
-static void fillMissingInstanceFeatureValues(ml_instance_definition &mlid, ml_mutable_data &mld, ml_vector<ml_stats_helper> &stats_helper) {
+static void fillMissingInstanceFeatureValues(ml_instance_definition &mlid, ml_data &mld, ml_vector<ml_stats_helper> &stats_helper) {
   
   //
   // fill in mean or mode (unless preserving missing for that feature) for all instances with missing values
@@ -351,7 +351,7 @@ static bool instanceDefinitionsMatchInCountTypeAndName(const ml_instance_definit
   return(instanceDefinitionsMatch(mlid, mlid_temp, false));
 }
 
-static bool loadInstanceDataFromFile(const ml_string &path_to_input_file, ml_instance_definition &mlid, ml_mutable_data &mld, ml_vector<ml_string> *ids) {
+static bool loadInstanceDataFromFile(const ml_string &path_to_input_file, ml_instance_definition &mlid, ml_data &mld, ml_vector<ml_string> *ids) {
 
   mld.clear();
   bool mlid_preloaded = mlid.empty() ? false : true;
@@ -427,7 +427,7 @@ static bool loadInstanceDataFromFile(const ml_string &path_to_input_file, ml_ins
 }
 
 bool loadInstanceDataFromFileUsingInstanceDefinition(const ml_string &path_to_input_file, const ml_instance_definition &mlid, 
-						     ml_mutable_data &mld, ml_vector<ml_string> *ids) {
+						     ml_data &mld, ml_vector<ml_string> *ids) {
 
   ml_instance_definition temp_mlid(mlid);
   if(!loadInstanceDataFromFile(path_to_input_file, temp_mlid, mld, ids)) {
@@ -442,7 +442,7 @@ bool loadInstanceDataFromFileUsingInstanceDefinition(const ml_string &path_to_in
   return(true);
 }
 
-bool loadInstanceDataFromFile(const ml_string &path_to_input_file, ml_instance_definition &mlid, ml_mutable_data &mld) {
+bool loadInstanceDataFromFile(const ml_string &path_to_input_file, ml_instance_definition &mlid, ml_data &mld) {
   mlid.clear();
   return(loadInstanceDataFromFile(path_to_input_file, mlid, mld, nullptr));
 }
@@ -563,9 +563,9 @@ void printClassificationResultsSummary(const ml_instance_definition &mlid, ml_ui
 }
 
 
-void splitDataIntoTrainingAndTest(ml_mutable_data &mld, ml_float training_factor, 
-				  ml_rng_config *rng_config, ml_mutable_data &training, 
-				  ml_mutable_data &test) {
+void splitDataIntoTrainingAndTest(ml_data &mld, ml_float training_factor, 
+				  ml_rng_config *rng_config, ml_data &training, 
+				  ml_data &test) {
   
   training.clear();
   test.clear();
@@ -581,11 +581,9 @@ void splitDataIntoTrainingAndTest(ml_mutable_data &mld, ml_float training_factor
 
   ml_uint training_size = (ml_uint) ((training_factor * mld.size()) + 0.5);
   shuffleVector(mld, rng_config);
-  training = ml_mutable_data(mld.begin(), mld.begin() + training_size);
+  training = ml_data(mld.begin(), mld.begin() + training_size);
   mld.erase(mld.begin(), mld.begin() + training_size);
-  test = ml_mutable_data(mld.begin(), mld.end());
-
-  mld.clear();
+  test = ml_data(mld.begin(), mld.end());
 }
 
 bool writeModelJSONToFile(const ml_string &path_to_file, cJSON *json_object) {
@@ -824,15 +822,6 @@ bool readInstanceDefinitionFromFile(const ml_string &path_to_file, ml_instance_d
 }
 
 
-void freeInstanceData(ml_mutable_data &mld) {
-  for(std::size_t ii = 0; ii < mld.size(); ++ii) {
-    delete mld[ii];
-  }
-
-  mld.clear();
-}
-
-
 static void createOneHotEncodingInstanceDefinition(const ml_instance_definition &mlid, const ml_string &name_of_index_to_predict, 
 						   ml_instance_definition &mlid_ohe, ml_vector<ml_stats_helper> &stats_helper) {
   //
@@ -858,14 +847,15 @@ static void createOneHotEncodingInstanceDefinition(const ml_instance_definition 
   }
 }
 
-static void createOneHotEncodingForData(const ml_instance_definition &mlid, const ml_mutable_data &mld, const ml_string &name_of_feature_to_predict,
-					ml_mutable_data &mld_ohe, ml_vector<ml_stats_helper> &stats_helper) {
+static void createOneHotEncodingForData(const ml_instance_definition &mlid, const ml_data &mld, 
+					const ml_string &name_of_feature_to_predict,
+					ml_data &mld_ohe, ml_vector<ml_stats_helper> &stats_helper) {
   //
   // convert the instances to the new one hot encoded format
   //
   for(std::size_t ii=0; ii < mld.size(); ++ii) {
     const ml_instance &inst = *mld[ii];
-    ml_instance *inst_ohe = new ml_instance;
+    ml_instance_ptr inst_ohe = std::make_shared<ml_instance>();
     
     for(std::size_t findex = 0; findex < mlid.size(); ++findex) {
       const ml_feature_desc &fdesc = mlid[findex];
@@ -903,9 +893,9 @@ static void updateStatsForOneHotEncoding(ml_instance_definition &mlid_ohe, const
 
 }
 
-bool createOneHotEncodingForData(const ml_instance_definition &mlid, const ml_mutable_data &mld, 
+bool createOneHotEncodingForData(const ml_instance_definition &mlid, const ml_data &mld, 
 				 const ml_string &name_of_feature_to_predict, 
-				 ml_instance_definition &mlid_ohe, ml_mutable_data &mld_ohe) {
+				 ml_instance_definition &mlid_ohe, ml_data &mld_ohe) {
 
   mlid_ohe.clear();
   mld_ohe.clear();

@@ -78,7 +78,7 @@ static void predictUsingNeighbors(const ml_vector<knn_neighbor> &all_distances, 
 
   for(std::size_t dist_index = 0; (dist_index < k) && (dist_index < all_distances.size()); ++dist_index) {
     
-    const ml_instance *neighbor = all_distances[dist_index].second;
+    ml_instance_ptr neighbor = all_distances[dist_index].second;
     
     if(neighbors_considered) {
       neighbors_considered->push_back(all_distances[dist_index]);

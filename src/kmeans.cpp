@@ -271,7 +271,7 @@ static void addkMeansClusterFeatureInstanceDefinition(ml_instance_definition &ml
 }
 
 
-static void addkMeansClusterFeatureData(const ml_instance_definition &mlid, ml_mutable_data &mld, const kmeans_result &result) {
+static void addkMeansClusterFeatureData(const ml_instance_definition &mlid, ml_data &mld, const kmeans_result &result) {
 
   //
   // Add a ml_feature_value to each instance that represent the cluster id of centroid nearest the instance
@@ -286,7 +286,7 @@ static void addkMeansClusterFeatureData(const ml_instance_definition &mlid, ml_m
 }
 
 
-bool addkMeansClusterFeature(ml_instance_definition &mlid, ml_mutable_data &mld, const kmeans_result &result, const ml_string &name) {
+bool addkMeansClusterFeature(ml_instance_definition &mlid, ml_data &mld, const kmeans_result &result, const ml_string &name) {
   
   addkMeansClusterFeatureData(mlid, mld, result);
   addkMeansClusterFeatureInstanceDefinition(mlid, result, name);

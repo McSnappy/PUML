@@ -27,18 +27,18 @@ SOFTWARE.
 
 namespace puml {
 
-  typedef struct {
+  struct kmeans_cluster {
     ml_uint id;
     ml_uint instances;
     ml_vector<ml_double> centroid;
-  } kmeans_cluster;
+  };
 
 
-  typedef struct {
+  struct kmeans_result {
     ml_vector<kmeans_cluster> clusters;
     ml_vector<ml_float> feature_weights;
     ml_double rss;
-  } kmeans_result;
+  };
 
 
   //
@@ -57,7 +57,7 @@ namespace puml {
   // 
   // returns true on success
   //
-  bool addkMeansClusterFeature(ml_instance_definition &mlid, ml_mutable_data &mld, const kmeans_result &result, const ml_string &name);
+  bool addkMeansClusterFeature(ml_instance_definition &mlid, ml_data &mld, const kmeans_result &result, const ml_string &name);
 
   //
   // Returns the cluster id (1 to k) of the cluster with centroid nearest to instance

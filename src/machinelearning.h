@@ -47,10 +47,10 @@ typedef enum {
 // ml_double is used when we operate on continuous feature values.
 // see ml_feature_value below
 //
-typedef float ml_float;
-typedef double ml_double;
-typedef uint32_t ml_uint;
-typedef std::string ml_string;
+using ml_float = float;
+using ml_double = double;
+using ml_uint = uint32_t;
+using ml_string = std::string;
 
 extern const ml_float ML_VERSION; 
 extern const ml_float MISSING_CONTINUOUS_FEATURE_VALUE;
@@ -65,11 +65,11 @@ using ml_map = std::map<T, T2>;
 //
 // Random Number Generator
 //
-typedef std::mt19937 ml_rng;
+using ml_rng = std::mt19937;
 
-typedef struct {
+struct ml_rng_config {
   ml_rng rng;
-} ml_rng_config;
+};
 
 
 // pass a 0 to initialize the seed using the clock
@@ -104,7 +104,7 @@ std::unique_ptr<T> make_unique( Args&& ...args ) {
 //
 // ml_feature_desc holds info about a feature's name, type, distribution, etc
 //
-typedef struct {
+struct ml_feature_desc {
 
   ml_feature_type type;
   ml_string name;
@@ -122,40 +122,41 @@ typedef struct {
   ml_vector<ml_uint> discrete_values_count;
   ml_uint discrete_mode_index;
 
-} ml_feature_desc;
+};
 
 
 //
 // change the typedef for ml_float above to alter
-// the precision and storage requirements for continuous features.
+// the precision for continuous features and storage 
+// requirements for all features.
 //
-typedef union {
+union ml_feature_value {
 
   ml_float continuous_value;
   ml_uint discrete_value_index;   
    
-} ml_feature_value;
+};
 
 
 // 
 // an ml_instance_definition is a vector of ml_feature_desc, one
 // to describe each feature column type, name, distribution, etc.
 //
-typedef ml_vector<ml_feature_desc> ml_instance_definition;
+using ml_instance_definition = ml_vector<ml_feature_desc>;
 
 
 //
 // ml_instance is a vector of feature values, parallel to some
 // ml_instance_definition
 //
-typedef ml_vector<ml_feature_value> ml_instance;
+using ml_instance = ml_vector<ml_feature_value>;
 
 
 //
 // a vector of instances represents a dataset
 //
-typedef ml_vector<const ml_instance *> ml_data;
-typedef ml_vector<ml_instance *> ml_mutable_data;
+using ml_instance_ptr = std::shared_ptr<ml_instance>;
+using ml_data =  ml_vector<ml_instance_ptr>;
 
 
 //
@@ -177,7 +178,7 @@ typedef ml_vector<ml_instance *> ml_mutable_data;
 // and a separate category for missing discrete features will be created. The 
 // default will use the feature's global mean or mode to populate missing values.
 //
-bool loadInstanceDataFromFile(const ml_string &path_to_input_file, ml_instance_definition &mlid, ml_mutable_data &mld);
+bool loadInstanceDataFromFile(const ml_string &path_to_input_file, ml_instance_definition &mlid, ml_data &mld);
 
 
 //
@@ -193,13 +194,7 @@ bool loadInstanceDataFromFile(const ml_string &path_to_input_file, ml_instance_d
 // of test data from kaggle competition, etc).
 //
 bool loadInstanceDataFromFileUsingInstanceDefinition(const ml_string &path_to_input_file, const ml_instance_definition &mlid, 
-						     ml_mutable_data &mld, ml_vector<ml_string> *ids = nullptr);
-
-
-//
-// free memory used for instances and empty mld
-//
-void freeInstanceData(ml_mutable_data &mld);
+						     ml_data &mld, ml_vector<ml_string> *ids = nullptr);
 
 
 //
@@ -207,9 +202,9 @@ void freeInstanceData(ml_mutable_data &mld);
 // after the call, training will have training_factor fraction of the data, test will have 
 // the remainder and mld will be empty.
 //
-void splitDataIntoTrainingAndTest(ml_mutable_data &mld, ml_float training_factor, 
-				  ml_rng_config *rng_config, ml_mutable_data &training, 
-				  ml_mutable_data &test);
+void splitDataIntoTrainingAndTest(ml_data &mld, ml_float training_factor, 
+				  ml_rng_config *rng_config, ml_data &training, 
+				  ml_data &test);
 
 
 //
@@ -227,9 +222,9 @@ ml_uint indexOfFeatureWithName(const ml_string &feature_name, const ml_instance_
 //
 // One Hot Encoding: Converts discrete (categorical) features to continuous binary features
 //
-bool createOneHotEncodingForData(const ml_instance_definition &mlid, const ml_mutable_data &mld, 
+bool createOneHotEncodingForData(const ml_instance_definition &mlid, const ml_data &mld, 
 				 const ml_string &name_of_feature_to_predict, 
-				 ml_instance_definition &mlid_ohe, ml_mutable_data &mld_ohe);
+				 ml_instance_definition &mlid_ohe, ml_data &mld_ohe);
 
 
 //
@@ -242,13 +237,13 @@ bool readInstanceDefinitionFromFile(const ml_string &path_to_file, ml_instance_d
 // 
 // Aggregate Classification Results
 //
-typedef struct {
+struct ml_classification_results {
 
   ml_uint instances;
   ml_uint instances_correctly_classified;
   ml_map<ml_string, ml_uint> confusion_matrix_map;
 
-} ml_classification_results;
+};
 
 
 void collectClassificationResultForInstance(const ml_instance_definition &mlid, ml_uint index_of_feature_to_predict, const ml_instance &instance, 
@@ -259,14 +254,14 @@ void printClassificationResultsSummary(const ml_instance_definition &mlid, ml_ui
 //
 // Aggregate Regression Results
 //
-typedef struct {
+struct ml_regression_results {
 
   ml_uint instances;
   ml_double sum_absolute_error;
   ml_double sum_mean_squared_error;
   //ml_double sum_log_loss;
   
-} ml_regression_results;
+};
 
 void collectRegressionResultForInstance(const ml_instance_definition &mlid, ml_uint index_of_feature_to_predict, const ml_instance &instance, 
 					const ml_feature_value *result, ml_regression_results &mlrr);

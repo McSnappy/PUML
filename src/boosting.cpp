@@ -48,7 +48,7 @@ static void fillDTConfig(dt_build_config &boosted_dtbc, const boosted_build_conf
 }
 
 
-static void sampleWithoutReplacement(const ml_mutable_data &mld, ml_data &mld_iter, ml_float subsample, ml_rng_config *rng_config) {
+static void sampleWithoutReplacement(const ml_data &mld, ml_data &mld_iter, ml_float subsample, ml_rng_config *rng_config) {
 
   mld_iter.clear();
 
@@ -82,7 +82,7 @@ static double leaf_optimization(double x, void *user) {
   double loss = 0.0;
 
   for(std::size_t ii = 0; ii < help->instances->size(); ++ii) {
-    const ml_instance *instance = (*help->instances)[ii];
+    ml_instance_ptr instance = (*help->instances)[ii];
     double yi = (*instance)[help->mlid->size()].continuous_value;
     double yhat = (*instance)[help->mlid->size() + 1].continuous_value + x;
 
@@ -154,7 +154,7 @@ static void optimizeLeafNodes(const ml_instance_definition &mlid, const boosted_
 }
 
 bool buildBoostedTrees(const ml_instance_definition &mlid, const boosted_build_config &bbc,
-		       const ml_mutable_data &mld, boosted_trees &bt, 
+		       const ml_data &mld, boosted_trees &bt, 
 		       boostedBuildCallback callback, void *user) {
 
   bt.trees.clear();

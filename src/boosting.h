@@ -72,7 +72,7 @@ typedef bool (*boostedBuildCallback)(const ml_instance_definition &mlid, const b
 // returns true on success
 //
 bool buildBoostedTrees(const ml_instance_definition &mlid, const boosted_build_config &bbc,
-		       const ml_mutable_data &mld, boosted_trees &bt, 
+		       const ml_data &mld, boosted_trees &bt, 
 		       boostedBuildCallback callback = nullptr, void *user = nullptr);
 
 

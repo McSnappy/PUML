@@ -55,12 +55,12 @@ int main(int argc, char **argv) {
   puml::log("\n\n *** Single Decision Tree Example Using Iris Data From UCI ***\n");
 
   // Load the Iris dataset 
-  puml::ml_mutable_data iris_mld;
+  puml::ml_data iris_mld;
   puml::ml_instance_definition iris_mlid;
   puml::loadInstanceDataFromFile("./iris.csv", iris_mlid, iris_mld);
 
   // Take 50% for training
-  puml::ml_mutable_data iris_training, iris_test;
+  puml::ml_data iris_training, iris_test;
   puml::ml_rng_config *rng_config = puml::createRngConfigWithSeed(333);
   puml::splitDataIntoTrainingAndTest(iris_mld, 0.5, rng_config, iris_training, iris_test);
 
@@ -81,22 +81,18 @@ int main(int argc, char **argv) {
   // Show the results over the hold out data
   puml::printDecisionTreeResultsForData(iris_mlid, puml::ml_data(iris_test.begin(), iris_test.end()), iris_tree);
 
-  // Release resources
-  puml::freeInstanceData(iris_training);
-  puml::freeInstanceData(iris_test);
-
 
   //
   // Random Forest Example 
   //
   puml::log("\n\n *** Random Forest Example Using CoverType Data From UCI ***\n");
-  puml::ml_mutable_data cover_mld;
+  puml::ml_data cover_mld;
   puml::ml_instance_definition cover_mlid;
   puml::loadInstanceDataFromFile("./covertype.csv", cover_mlid, cover_mld);
   puml::printInstanceDataSummary(cover_mlid);
 
   // Train on 10% for this demonstration 
-  puml::ml_mutable_data cover_training, cover_test;
+  puml::ml_data cover_training, cover_test;
   puml::splitDataIntoTrainingAndTest(cover_mld, 0.1, rng_config, cover_training, cover_test);
   
   puml::rf_forest cover_forest;
@@ -120,21 +116,17 @@ int main(int argc, char **argv) {
   // Save the model to disk
   puml::writeRandomForestToDirectory("/tmp/rf-cover", cover_mlid, cover_forest);
 
-  // Release resources
-  puml::freeInstanceData(cover_training);
-  puml::freeInstanceData(cover_test);
-  
  
   //
   // Boosted Regression Trees example
   //
   puml::log("\n\n *** Boosted Trees Example Using Wine Quality Data From UCI ***\n");
-  puml::ml_mutable_data wine_mld;
+  puml::ml_data wine_mld;
   puml::ml_instance_definition wine_mlid;
   puml::loadInstanceDataFromFile("./winequality-white.csv", wine_mlid, wine_mld);
 
   // Take 80% for training
-  puml::ml_mutable_data wine_training, wine_test;
+  puml::ml_data wine_training, wine_test;
   puml::splitDataIntoTrainingAndTest(wine_mld, 0.8, rng_config, wine_training, wine_test);
 
   // Build the boosted trees
@@ -155,10 +147,6 @@ int main(int argc, char **argv) {
 
   // Store the model 
   puml::writeBoostedTreesToDirectory("/tmp/boosted_test", wine_mlid, bt);
-
-  // Release resources
-  puml::freeInstanceData(wine_training);
-  puml::freeInstanceData(wine_test);
   
   return(0);
 }

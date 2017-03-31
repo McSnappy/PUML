@@ -1,8 +1,8 @@
 .PHONY = all debug mltest clean 
 
 CXX = /usr/bin/g++
-CXXFLAGS = -O2 -Wall -std=c++11
-LDDFLAGS = -lpumlbrent -lpthread
+CXXFLAGS = -O2 -flto -Wall -std=c++11
+LDDFLAGS = -flto -lpumlbrent -lpthread
 
 UNAME_S := $(shell uname -s)
 ifneq ($(UNAME_S),Darwin)
