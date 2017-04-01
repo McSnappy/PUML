@@ -187,47 +187,46 @@ static void addSplitsForDiscreteFeature(const ml_feature_desc &mlfd, ml_uint fea
   
 }
 
-static void addSplitsForContinuousFeature(const ml_feature_desc &mlfd, ml_uint feature_index, const ml_data &mld, const dt_build_config &dtbc, ml_vector<dt_split> &splits) {
+static void addSplitsForContinuousFeature(ml_uint feature_index, const ml_data &mld, const dt_build_config &dtbc, ml_vector<dt_split> &splits) {
+
+  // 
+  // add splits based on the distribution of the feature in mld
+  //
 
   if(mld.empty()) {
     return;
   }
 
-  ml_vector<dt_split> feature_splits;
-  ml_vector<ml_float> column;
-  column.reserve(mld.size());
+  ml_uint count = 0;
+  ml_double mean = 0, M2 = 0;
 
   for(const auto &inst_ptr : mld) {
-    column.push_back((*inst_ptr)[feature_index].continuous_value);
+    ml_double fval = (*inst_ptr)[feature_index].continuous_value;
+    ++count;
+    ml_double delta = fval - mean;
+    mean = mean + (delta / count);
+    M2 = M2 + (delta * (fval - mean));
   }
 
-  std::sort(column.begin(), column.end());
+  ml_double std = (count < 2) ? 0.0 : std::sqrt( M2 / (count - 1));
+
+  dt_split csplit{};
+  csplit.split_feature_index = feature_index;
+  csplit.split_feature_type = ML_FEATURE_TYPE_CONTINUOUS;
+  csplit.split_right_op = DT_COMPARISON_OP_GREATERTHAN;
+  csplit.split_left_op = DT_COMPARISON_OP_LESSTHANOREQUAL;
   
-  for(std::size_t ii=0; ii < (column.size() - 1); ++ii) {
+  csplit.split_feature_value.continuous_value = mean;
+  splits.push_back(csplit);    
 
-    if(fabs(column[ii] - column[ii+1]) < DT_COMPARISON_EQUAL_TOL) {
-      continue;
-    }
+  if(std > 0.0) {
+    csplit.split_feature_value.continuous_value = mean + (std / 2.0);
+    splits.push_back(csplit);  
 
-    dt_split csplit = {};
-    csplit.split_feature_index = feature_index;
-    csplit.split_feature_type = ML_FEATURE_TYPE_CONTINUOUS;
-    csplit.split_feature_value.continuous_value = (column[ii] + column[ii+1]) / 2.0;
-    csplit.split_right_op = DT_COMPARISON_OP_GREATERTHAN;
-    csplit.split_left_op = DT_COMPARISON_OP_LESSTHANOREQUAL;
-    feature_splits.push_back(csplit);    
-
+    csplit.split_feature_value.continuous_value = mean - (std / 2.0);
+    splits.push_back(csplit);      
   }
-
-  if((dtbc.max_continuous_feature_splits > 0) && dtbc.rng_config && (feature_splits.size() > dtbc.max_continuous_feature_splits)) {
-    shuffleVector(feature_splits, dtbc.rng_config);
-    feature_splits.resize(dtbc.max_continuous_feature_splits);
-  }
-
-  if(feature_splits.size() > 0) {
-    splits.insert(splits.end(), feature_splits.begin(), feature_splits.end());
-  }
-
+  
 }
 
 
@@ -392,7 +391,7 @@ static bool findBestSplit(const ml_instance_definition &mlid, const ml_data &mld
 
     switch(mlid[findex].type) {
     case ML_FEATURE_TYPE_DISCRETE: addSplitsForDiscreteFeature(mlid[findex], findex, splits); break;
-    case ML_FEATURE_TYPE_CONTINUOUS: addSplitsForContinuousFeature(mlid[findex], findex, mld, dtbc, splits); break;
+    case ML_FEATURE_TYPE_CONTINUOUS: addSplitsForContinuousFeature(findex, mld, dtbc, splits); break;
     default: log_error("invalid feature type...\n"); break;
     }
   }
