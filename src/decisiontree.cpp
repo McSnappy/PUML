@@ -27,6 +27,7 @@ SOFTWARE.
 #include <limits>
 #include <sstream>
 #include <chrono>
+#include <unordered_set>
 
 #include "decisiontree.h"
 
@@ -170,16 +171,37 @@ static void performSplit(const ml_data &mld, const dt_split &split, ml_data &lef
   }
 }
 
-static void addSplitsForDiscreteFeature(const ml_feature_desc &mlfd, ml_uint feature_index, ml_vector<dt_split> &splits) {
+static void addSplitsForDiscreteFeature(ml_uint feature_index, const ml_data &mld, ml_vector<dt_split> &splits) {
   
-  // if this is a binary feature (plus missing category) we only need to consider one class 
-  std::size_t end_index = (mlfd.discrete_values.size() == 3) ? 2 : mlfd.discrete_values.size(); 
-  
-  for(std::size_t ii=(mlfd.preserve_missing ? 0 : 1); ii < end_index; ++ii) { // 0 index is the <unknown> category
-    dt_split dsplit = {};
+  if(mld.empty()) {
+    return;
+  }
+
+  std::unordered_set<ml_uint> levels;
+  for(const auto &inst_ptr : mld) {
+    ml_uint level = (*inst_ptr)[feature_index].discrete_value_index;
+    levels.insert(level);
+  }
+
+  //
+  // only 1 level so no split possible
+  //
+  if(levels.size() == 1) {
+    return;
+  }
+
+  // 
+  // if 2 levels are present remove one since checking both is redundant 
+  //
+  if(levels.size() == 2) {
+    levels.erase(levels.begin());
+  }
+
+  for(const ml_uint &level : levels) {
+    dt_split dsplit{};
     dsplit.split_feature_index = feature_index;
     dsplit.split_feature_type = ML_FEATURE_TYPE_DISCRETE;
-    dsplit.split_feature_value.discrete_value_index = ii;
+    dsplit.split_feature_value.discrete_value_index = level;
     dsplit.split_right_op = DT_COMPARISON_OP_EQUAL;
     dsplit.split_left_op = DT_COMPARISON_OP_NOTEQUAL;
     splits.push_back(dsplit);
@@ -187,7 +209,7 @@ static void addSplitsForDiscreteFeature(const ml_feature_desc &mlfd, ml_uint fea
   
 }
 
-static void addSplitsForContinuousFeature(ml_uint feature_index, const ml_data &mld, const dt_build_config &dtbc, ml_vector<dt_split> &splits) {
+static void addSplitsForContinuousFeature(ml_uint feature_index, const ml_data &mld, ml_vector<dt_split> &splits) {
 
   // 
   // add splits based on the distribution of the feature in mld
@@ -390,8 +412,8 @@ static bool findBestSplit(const ml_instance_definition &mlid, const ml_data &mld
     }
 
     switch(mlid[findex].type) {
-    case ML_FEATURE_TYPE_DISCRETE: addSplitsForDiscreteFeature(mlid[findex], findex, splits); break;
-    case ML_FEATURE_TYPE_CONTINUOUS: addSplitsForContinuousFeature(findex, mld, dtbc, splits); break;
+    case ML_FEATURE_TYPE_DISCRETE: addSplitsForDiscreteFeature(findex, mld, splits); break;
+    case ML_FEATURE_TYPE_CONTINUOUS: addSplitsForContinuousFeature(findex, mld, splits); break;
     default: log_error("invalid feature type...\n"); break;
     }
   }
