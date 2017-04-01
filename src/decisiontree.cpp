@@ -82,15 +82,17 @@ static bool validateInput(const ml_instance_definition &mlid, const ml_data &mld
 }
 
 static ml_double calcMeanForContinuousFeature(ml_uint feature_index, const ml_data &mld) {
-  ml_double sum = 0.0;
-  ml_uint count = 0;
 
-  for(std::size_t ii=0; ii < mld.size(); ++ii) {
-    sum += (*mld[ii])[feature_index].continuous_value;
-    ++count;
+  if(mld.empty()) {
+    return(0.0);
   }
 
-  ml_double mean = (count > 0) ? (sum / count) : 0.0;
+  ml_double sum = 0.0;
+  for(const auto &inst_ptr : mld) {
+    sum += (*inst_ptr)[feature_index].continuous_value;
+  }
+
+  ml_double mean = sum / mld.size();
   return(mean);
 }
 
@@ -98,13 +100,13 @@ static ml_uint calcModeValueIndexForDiscreteFeature(ml_uint feature_index, const
 
   ml_map<ml_uint, ml_uint> value_map;
 
-  for(std::size_t ii=0; ii < mld.size(); ++ii) {
-    ml_uint discrete_value_index = (*mld[ii])[feature_index].discrete_value_index;
+  for(const auto &inst_ptr : mld) {
+    ml_uint discrete_value_index = (*inst_ptr)[feature_index].discrete_value_index;
     value_map[discrete_value_index] += 1;
   }
 
   ml_uint mindex = 0, mmax = 0;
-  for(ml_map<ml_uint, ml_uint>::iterator it = value_map.begin(); it != value_map.end(); ++it) {
+  for(auto it = value_map.begin(); it != value_map.end(); ++it) {
     if(it->second > mmax) {
       mindex = it->first;
       mmax = it->second;
@@ -158,12 +160,12 @@ static void performSplit(const ml_data &mld, const dt_split &split, ml_data &lef
   leftmld.reserve(mld.size());
   rightmld.reserve(mld.size());
 
-  for(std::size_t ii=0; ii < mld.size(); ++ii) {
-    if(instanceSatisfiesLeftConstraintOfSplit(*mld[ii], split.split_feature_index, split.split_feature_type, split.split_feature_value, split.split_left_op)) {
-      leftmld.push_back(mld[ii]);
+  for(const auto &inst_ptr : mld) {
+    if(instanceSatisfiesLeftConstraintOfSplit(*inst_ptr, split.split_feature_index, split.split_feature_type, split.split_feature_value, split.split_left_op)) {
+      leftmld.push_back(inst_ptr);
     }
     else {
-      rightmld.push_back(mld[ii]);
+      rightmld.push_back(inst_ptr);
     }
   }
 }
@@ -187,12 +189,16 @@ static void addSplitsForDiscreteFeature(const ml_feature_desc &mlfd, ml_uint fea
 
 static void addSplitsForContinuousFeature(const ml_feature_desc &mlfd, ml_uint feature_index, const ml_data &mld, const dt_build_config &dtbc, ml_vector<dt_split> &splits) {
 
+  if(mld.empty()) {
+    return;
+  }
+
   ml_vector<dt_split> feature_splits;
   ml_vector<ml_float> column;
   column.reserve(mld.size());
 
-  for(std::size_t ii=0; ii < mld.size(); ++ii) {
-    column.push_back((*mld[ii])[feature_index].continuous_value);
+  for(const auto &inst_ptr : mld) {
+    column.push_back((*inst_ptr)[feature_index].continuous_value);
   }
 
   std::sort(column.begin(), column.end());
@@ -633,11 +639,11 @@ void printDecisionTreeResultsForData(const ml_instance_definition &mlid, const m
 
   ml_regression_results mlrr = {};
   ml_classification_results mlcr = {};
-  for(std::size_t ii=0; ii < mld.size(); ++ii) {
-    const ml_feature_value *result = evaluateDecisionTreeForInstance(mlid, tree, *mld[ii]);
+  for(const auto &inst_ptr : mld) {
+    const ml_feature_value *result = evaluateDecisionTreeForInstance(mlid, tree, *inst_ptr);
     switch(tree.type) {
-    case DT_TREE_TYPE_CLASSIFICATION: collectClassificationResultForInstance(mlid, tree.index_of_feature_to_predict, *mld[ii], result, mlcr); break;
-    case DT_TREE_TYPE_REGRESSION: collectRegressionResultForInstance(mlid, tree.index_of_feature_to_predict, *mld[ii], result, mlrr); break;
+    case DT_TREE_TYPE_CLASSIFICATION: collectClassificationResultForInstance(mlid, tree.index_of_feature_to_predict, *inst_ptr, result, mlcr); break;
+    case DT_TREE_TYPE_REGRESSION: collectRegressionResultForInstance(mlid, tree.index_of_feature_to_predict, *inst_ptr, result, mlrr); break;
     default: break;
     }
   }
