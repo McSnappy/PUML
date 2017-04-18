@@ -261,13 +261,13 @@ static std::tuple<ml_double, ml_double, ml_double> scoreRegionsWithSplitForRegre
   ml_double lscore = 0, rscore = 0, combined_score = 0;
   ml_uint n_left = 0, n_right = 0;
   ml_double mean_left = 0, mean_right = 0;
-  
-  for(auto ii=0; ii < mld.size(); ++ii) {
+
+  for(const auto &inst_ptr : mld) {
     
-    ml_double feature_val = (*mld[ii])[tree.index_of_feature_to_predict].continuous_value;
+    ml_double feature_val = (*inst_ptr)[tree.index_of_feature_to_predict].continuous_value;
     
     if((split.split_left_op == DT_COMPARISON_OP_NOOP) || 
-       instanceSatisfiesLeftConstraintOfSplit(*mld[ii], split.split_feature_index, 
+       instanceSatisfiesLeftConstraintOfSplit(*inst_ptr, split.split_feature_index, 
 					      split.split_feature_type, split.split_feature_value,
 					      split.split_left_op)) {
       ++n_left;
@@ -300,13 +300,13 @@ static std::tuple<ml_double, ml_double, ml_double> scoreRegionsWithSplitForClass
   ml_map<ml_uint, ml_uint> left_value_map;
   ml_map<ml_uint, ml_uint> right_value_map;
   ml_uint lcount=0, rcount=0;
-  
-  for(auto ii=0; ii < mld.size(); ++ii) {
+
+  for(auto const &inst_ptr : mld) {
     
-    ml_uint discrete_value_index = (*mld[ii])[tree.index_of_feature_to_predict].discrete_value_index;
+    ml_uint discrete_value_index = (*inst_ptr)[tree.index_of_feature_to_predict].discrete_value_index;
     
     if((split.split_left_op == DT_COMPARISON_OP_NOOP) || 
-       instanceSatisfiesLeftConstraintOfSplit(*mld[ii], split.split_feature_index, 
+       instanceSatisfiesLeftConstraintOfSplit(*inst_ptr, split.split_feature_index, 
 					      split.split_feature_type, split.split_feature_value,
 					      split.split_left_op)) {
       left_value_map[discrete_value_index] += 1;
