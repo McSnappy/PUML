@@ -7,7 +7,7 @@ LDDFLAGS = -flto -lpumlbrent -lpthread
 UNAME_S := $(shell uname -s)
 ifneq ($(UNAME_S),Darwin)
 	CXXFLAGS += -ffloat-store
-	LDDFLAGS += -Wl,-rpath=.
+	LDDFLAGS += -Wl,-rpath=.,--no-as-needed -pthread
 endif
 
 all: clean mltest 
