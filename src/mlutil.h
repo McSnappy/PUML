@@ -22,18 +22,41 @@ SOFTWARE.
 
 #pragma once
 
-#include "machinelearning.h"
-#include "decisiontree.h"
+#include "mldata.h"
+
 
 namespace puml {
 
+  class decision_tree;
+
+  //
+  // Model Save/Restore Helpers
+  //
   extern const ml_string &TREE_MODEL_FILE_PREFIX;
 
-  bool prepareDirectoryForModelSave(const ml_string &path_to_dir,
-				    bool overwrite_existing);
+  bool prepare_directory_for_model_save(const ml_string &path_to_dir);
 
-  bool readDecisionTreesFromDirectory(const ml_string &path_to_dir,
-				      ml_vector<dt_tree> &trees);
+  bool read_decision_trees_from_directory(const ml_string &path_to_dir,
+					  const ml_instance_definition &mlid,
+					  ml_vector<decision_tree> &trees);
+
+  bool get_numeric_value_from_json(cJSON *json_object, const ml_string &name, ml_uint &value);
+  bool get_float_value_from_json(cJSON *json_object, const ml_string &name, ml_float &value);
+  bool get_double_value_from_json(cJSON *json_object, const ml_string &name, ml_double &value);
+  bool get_bool_value_from_json(cJSON *json_object, const ml_string &name, bool &value);
+  bool get_modeltype_value_from_json(cJSON *json_object, const ml_string &name, ml_model_type &value);
+
+
+  //
+  // sprintf for string
+  //
+  template<typename ... Args>
+  ml_string string_format(const ml_string &format, Args ... args) {
+    size_t size = snprintf(nullptr, 0, format.c_str(), args ...) + 1;
+    std::unique_ptr<char[]> buf(new char[size]);
+    snprintf(buf.get(), size, format.c_str(), args ...);
+    return(ml_string(buf.get(), buf.get() + size - 1));
+  }
 
 }
 

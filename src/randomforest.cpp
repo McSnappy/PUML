@@ -21,7 +21,6 @@ SOFTWARE.
 */
 
 #include <sstream>
-#include <set>
 #include <iomanip>
 #include <algorithm>
 #include <thread>
@@ -32,46 +31,73 @@ SOFTWARE.
 
 namespace puml {
 
-typedef std::set<ml_uint> rf_oob_indices;
-
-const ml_uint RF_DEFAULT_MIN_LEAF_INSTANCES = 2;
-const ml_string &RF_BASEINFO_FILE = "rf.json";
-const ml_string &RF_MLID_FILE = "mlid.json";
+static const ml_string &RF_BASEINFO_FILE = "rf.json";
+static const ml_string &RF_MLID_FILE = "mlid.json";
 
 struct rf_thread_config {
 
-  rf_thread_config(ml_uint tindex, ml_uint ntrees, const dt_build_config &dtconfig,
-		   const ml_data &data, const ml_instance_definition &def) :
-    thread_index(tindex), number_of_trees(ntrees), dtbc(dtconfig), mld(data), mlid(def) {}
+  rf_thread_config(ml_uint tindex, ml_uint ntrees,
+		   const decision_tree &ptree, const ml_data &data) :
+    thread_index(tindex), number_of_trees(ntrees),
+    proto_tree(ptree), mld(data) {}
 
   ml_uint thread_index;
   ml_uint number_of_trees;
-  dt_build_config dtbc;
+  decision_tree proto_tree;
   const ml_data &mld;
-  const ml_instance_definition &mlid;
 
   ml_vector<rf_oob_indices> oobs;
-  ml_vector<dt_tree> trees;
+  ml_vector<decision_tree> trees;
 };
 
 using rf_thread_config_ptr = std::shared_ptr<rf_thread_config>;
 
 
-static void initOutOfBagIndices(ml_uint size, rf_oob_indices &oob) {
+random_forest::random_forest(const ml_instance_definition &mlid,
+			     const ml_string &feature_to_predict,
+			     ml_uint number_of_trees,
+			     ml_uint seed,
+			     ml_uint number_of_threads,
+			     ml_uint max_tree_depth,
+			     ml_uint min_leaf_instances,
+			     ml_uint features_to_consider_per_node) :
+  mlid_(mlid),
+  index_of_feature_to_predict_(index_of_feature_with_name(feature_to_predict, mlid)),
+  number_of_trees_(number_of_trees),
+  seed_(seed),
+  number_of_threads_(number_of_threads),
+  max_tree_depth_(max_tree_depth),
+  min_leaf_instances_(min_leaf_instances),
+  features_to_consider_per_node_(features_to_consider_per_node) {
+
+  type_ = (mlid_[index_of_feature_to_predict_]->type == ml_feature_type::discrete) ? ml_model_type::classification : ml_model_type::regression;
+  
+  if(number_of_threads_ > number_of_trees_) {
+    number_of_threads_ = 1;
+  }
+
+  if(features_to_consider_per_node_ == RF_DEFAULT_FEATURES_SQRT) {
+    features_to_consider_per_node_ = (ml_uint) (std::sqrt(mlid.size() - 1) + 0.5);
+  }
+}
+
+
+static void init_outofbag_indices(ml_uint size, rf_oob_indices &oob) {
   oob.clear();
   for(ml_uint ii=0; ii < size; ++ii) {
     oob.insert(oob.end(), ii);
   }
 }
 
-static void bootstrappedSampleFromData(const ml_data &mld, ml_rng_config *rng_config, ml_data &bootstrapped, rf_oob_indices &oob) {
+
+static void bootstrapped_sample_from_data(const ml_data &mld, ml_rng &rng, 
+					  ml_data &bootstrapped, rf_oob_indices &oob) {
 
   bootstrapped.clear();
-  initOutOfBagIndices(mld.size(), oob);
+  init_outofbag_indices(mld.size(), oob);
 
   for(std::size_t ii=0; ii < mld.size(); ++ii) {
-
-    ml_uint index = generateRandomNumber(rng_config) % mld.size();
+    ml_uint index = rng.random_number() % mld.size();
     bootstrapped.push_back(mld[index]);
 
     rf_oob_indices::iterator oobit = oob.find(index);
@@ -82,69 +108,58 @@ static void bootstrappedSampleFromData(const ml_data &mld, ml_rng_config *rng_co
 
 }
 
-static void calculateOutOfBagError(const ml_instance_definition &mlid, const ml_data &mld, const rf_forest &forest, 
-				   const ml_vector<rf_oob_indices> &oobs, ml_vector<ml_feature_value> *oob_for_mld) {
-  
-  ml_classification_results mlcr = {};
-  ml_regression_results mlrr = {};
 
-  for(std::size_t instance_index=0; instance_index < mld.size(); ++instance_index) {
-    
-    rf_forest oob_forest;
-    oob_forest.index_of_feature_to_predict = forest.index_of_feature_to_predict;
-    oob_forest.type = forest.type;
-
-    // find all trees that were built without this instance (it's in their out-of-bag set)
-    for(std::size_t tree_index = 0; tree_index < forest.trees.size(); ++tree_index) {
-      if(oobs[tree_index].find(instance_index) != oobs[tree_index].end()) {
-	oob_forest.trees.push_back(forest.trees[tree_index]);
-      }
-    }
-
-    ml_feature_value prediction;
-    if(evaluateRandomForestForInstance(mlid, oob_forest, *mld[instance_index], prediction)) {
-      switch(oob_forest.type) {
-      case DT_TREE_TYPE_CLASSIFICATION: collectClassificationResultForInstance(mlid, oob_forest.index_of_feature_to_predict, *mld[instance_index], &prediction, mlcr); break;
-      case DT_TREE_TYPE_REGRESSION: collectRegressionResultForInstance(mlid, oob_forest.index_of_feature_to_predict, *mld[instance_index], &prediction, mlrr); break;
-      default: break;
-      }
-
-      if(oob_for_mld) {
-	oob_for_mld->push_back(prediction);
-      }
-    }
-    
-  } // for( all instances in mld )
-
-  log("\n*** Out Of Bag Error ***\n");
-
-  switch(forest.type) {
-  case DT_TREE_TYPE_CLASSIFICATION: printClassificationResultsSummary(mlid, forest.index_of_feature_to_predict, mlcr); break;
-  case DT_TREE_TYPE_REGRESSION: printRegressionResultsSummary(mlrr); break;
-  default: break;
-  }
+void random_forest::set_trees(const ml_vector<decision_tree> &trees) {
+  oob_predictions_.clear();
+  feature_importance_.clear();
+  trees_ = trees;
 }
 
-static void collectFeatureImportance(const ml_vector<dt_feature_importance> &tree_feature_importance, 
-				     ml_vector<dt_feature_importance> &forest_feature_importance) {
+
+void random_forest::evaluate_out_of_bag(const ml_data &mld, const ml_vector<rf_oob_indices> &oobs) {
+  
+  oob_predictions_.clear();
+  random_forest oob_forest = *this;
+
+  for(ml_uint instance_index = 0; instance_index < mld.size(); ++instance_index) {
+    
+    // find all trees that were built without this instance (it's in their out-of-bag set)
+    ml_vector<decision_tree> oob_trees;
+    for(std::size_t tree_index = 0; tree_index < trees_.size(); ++tree_index) {
+      if(oobs[tree_index].find(instance_index) != oobs[tree_index].end()) {
+	oob_trees.push_back(trees_[tree_index]);
+      }
+    }
+
+    oob_forest.set_trees(oob_trees);    
+    ml_feature_value prediction = oob_forest.evaluate(*mld[instance_index]);
+    oob_predictions_.push_back(prediction);
+  } 
+
+}
+
+
+static void collect_feature_importance(const ml_vector<dt_feature_importance> &tree_feature_importance, 
+				       ml_vector<dt_feature_importance> &forest_feature_importance) {
   for(std::size_t ii = 0; ii < tree_feature_importance.size(); ++ii) {
     forest_feature_importance[ii].count += tree_feature_importance[ii].count;
     forest_feature_importance[ii].sum_score_delta += tree_feature_importance[ii].sum_score_delta;
   }
 }
 
-static void printFeatureImportance(const ml_instance_definition &mlid, ml_uint index_of_feature_to_predict, 
-				   ml_vector<dt_feature_importance> &forest_feature_importance) {
 
+static ml_vector<feature_importance_tuple> calculate_feature_importance(const ml_instance_definition &mlid,
+									ml_uint index_of_feature_to_predict,
+									ml_vector<dt_feature_importance> forest_feature_importance) {
   ml_double best_score_delta = 0.0;
-  for(std::size_t ii = 0; ii < forest_feature_importance.size(); ++ii) {
-    ml_double score_delta = (forest_feature_importance[ii].count > 0) ? forest_feature_importance[ii].sum_score_delta : 0.0;
+  for(const auto &feature_importance : forest_feature_importance) {
+    ml_double score_delta = (feature_importance.count > 0) ? feature_importance.sum_score_delta : 0.0;
     if(score_delta > best_score_delta) {
       best_score_delta = score_delta;
     }
   }
 
-  ml_vector<ml_string> feature_importance_norm;
+  ml_vector<feature_importance_tuple> feature_importance_norm;
   feature_importance_norm.reserve(forest_feature_importance.size());
   for(std::size_t ii = 0; ii < forest_feature_importance.size(); ++ii) {
     if(ii == index_of_feature_to_predict) {
@@ -155,50 +170,49 @@ static void printFeatureImportance(const ml_instance_definition &mlid, ml_uint i
     ml_double avg_score_delta = (forest_feature_importance[ii].count > 0) ? (forest_feature_importance[ii].sum_score_delta / forest_feature_importance[ii].count) : 0.0;
     ml_double norm_score = (best_score_delta > 0.0) ? (100.0 * (score_delta / best_score_delta)) : 0.0;
     std::ostringstream ss;
-    ss << std::setw(7) << std::fixed << std::setprecision(2) << norm_score << " " << mlid[ii].name << " (" << forest_feature_importance[ii].count << " nodes, " << avg_score_delta << ")";
-    feature_importance_norm.push_back(ss.str());
+    ss << std::setw(7) << std::fixed << std::setprecision(2) << norm_score << " " << mlid[ii]->name << " (" << forest_feature_importance[ii].count << " nodes, " << avg_score_delta << ")";
+    //
+    // feature_importance_tuple represents the feature index and feature 
+    // importance score description
+    //
+    feature_importance_norm.push_back(std::make_pair(ii, ss.str()));
   }
 
-  log("\n\n*** Feature Importance ***\n");
-  std::sort(feature_importance_norm.begin(), feature_importance_norm.end());
-  for(std::size_t ii=0; ii < feature_importance_norm.size(); ++ii) {
-    log("%s\n", feature_importance_norm[ii].c_str());
-  }
+  std::sort(feature_importance_norm.begin(), 
+	    feature_importance_norm.end(), 
+	    [](feature_importance_tuple const &t1, feature_importance_tuple const &t2) {
+	      return(std::get<1>(t1) < std::get<1>(t2));
+	    });
 
+  return(feature_importance_norm);
 }
 
-static void fillDTConfig(const rf_build_config &rfbc, ml_uint thread_index, dt_build_config &dtbc) {
-  dtbc.index_of_feature_to_predict = rfbc.index_of_feature_to_predict;
-  dtbc.max_tree_depth = rfbc.max_tree_depth;
-  dtbc.rng_config = createRngConfigWithSeed(rfbc.seed + thread_index);
-  dtbc.min_leaf_instances = (rfbc.min_leaf_instances == 0) ? RF_DEFAULT_MIN_LEAF_INSTANCES : rfbc.min_leaf_instances;
-  dtbc.max_continuous_feature_splits = rfbc.max_continuous_feature_splits;
-  dtbc.features_to_consider_per_node = rfbc.features_to_consider_per_node; 
-}
+bool random_forest::single_threaded_train(const ml_data &mld, 
+					  ml_vector<rf_oob_indices> &oobs, 
+					  ml_vector<dt_feature_importance> &forest_feature_importance) {
 
-static bool singleThreaded_buildRandomForest(const rf_build_config &rfbc, const ml_instance_definition &mlid, const ml_data &mld, rf_forest &forest, 
-					     ml_vector<rf_oob_indices> &oobs, ml_vector<dt_feature_importance> &forest_feature_importance) {
-  dt_build_config dtbc = {};
-  fillDTConfig(rfbc, 0, dtbc);
+  ml_rng rng(seed_);
 
-  for(ml_uint ii=0; ii < rfbc.number_of_trees; ++ii) {
+  for(ml_uint ii=0; ii < number_of_trees_; ++ii) {
     
     ml_data bootstrapped;
     rf_oob_indices oob;
-    
-    bootstrappedSampleFromData(mld, dtbc.rng_config, bootstrapped, oob);
+    bootstrapped_sample_from_data(mld, rng, bootstrapped, oob);
 
     log("\nbuilding tree %d...\n", ii+1);
 
-    dt_tree tree;
-    if(!buildDecisionTree(mlid, bootstrapped, dtbc, tree)) {
-      log_error("failed to build decision tree...");
+    decision_tree tree{mlid_, index_of_feature_to_predict_, 
+	max_tree_depth_, min_leaf_instances_, 
+        features_to_consider_per_node_, seed_};
+
+    if(!tree.train(bootstrapped)) {
+      log_error("rf failed to build decision tree...");
       return(false);
     }
 
     oobs.push_back(oob);
-    collectFeatureImportance(tree.feature_importance, forest_feature_importance);
-    forest.trees.push_back(tree);
+    collect_feature_importance(tree.feature_importance(), forest_feature_importance);
+    trees_.push_back(tree);
 
   }
 
@@ -206,69 +220,65 @@ static bool singleThreaded_buildRandomForest(const rf_build_config &rfbc, const 
 }
 
 
-static void multiThreaded_buildTree(rf_thread_config_ptr rftc) {
-  
-  std::ostringstream ss;
-  ss << "[thread " << rftc->thread_index << "]";
-  ml_string thread_name = ss.str();
+static void multi_threaded_work(rf_thread_config_ptr rftc) {
+
+  ml_rng rng(rftc->proto_tree.seed());
 
   for(ml_uint ii=0; ii < rftc->number_of_trees; ++ii) {
+
     ml_data bootstrapped;
-    rf_oob_indices oob;
+    rf_oob_indices oob; 
+    bootstrapped_sample_from_data(rftc->mld, rng, bootstrapped, oob);
     
-    bootstrappedSampleFromData(rftc->mld, rftc->dtbc.rng_config, bootstrapped, oob);
+    log("%s building tree %d...\n", rftc->proto_tree.name().c_str(), ii+1);
     
-    log("%s building tree %d...\n", thread_name.c_str(), ii+1);
-    
-    dt_tree tree;
-    tree.name = thread_name;
-    if(!buildDecisionTree(rftc->mlid, bootstrapped, rftc->dtbc, tree)) {
-      log_error("failed to build decision tree %d-%d...\n", rftc->thread_index, ii+1);
+    if(!rftc->proto_tree.train(bootstrapped)) {
+      log_error("rf failed to build decision tree %d-%d...\n", rftc->thread_index, ii+1);
       return;
     }
     
     rftc->oobs.push_back(oob);
-    rftc->trees.push_back(tree);
+    rftc->trees.push_back(rftc->proto_tree);
+
   }
 
-  return;
 }
 
-static bool multiThreaded_buildRandomForest(const rf_build_config &rfbc, const ml_instance_definition &mlid, const ml_data &mld, rf_forest &forest, 
-					  ml_vector<rf_oob_indices> &oobs, ml_vector<dt_feature_importance> &forest_feature_importance) {
 
-  if(rfbc.number_of_threads > rfbc.number_of_trees) {
-    log_error("requested # of threads (%u) is greater than # of trees (%u)\n", rfbc.number_of_threads, rfbc.number_of_trees);
-    return(false);
-  }
+bool random_forest::multi_threaded_train(const ml_data &mld, 
+					 ml_vector<rf_oob_indices> &oobs, 
+					 ml_vector<dt_feature_importance> &forest_feature_importance) {
 
   ml_vector<std::thread> work_threads;
   ml_vector<rf_thread_config_ptr> thread_configs;
 
   // init thread input (# trees to build, custom seed, etc) and spawn the threads
-  for(ml_uint thread_index = 0; thread_index < rfbc.number_of_threads; ++thread_index) {
+  for(ml_uint thread_index = 0; thread_index < number_of_threads_; ++thread_index) {
     
-    dt_build_config dtbc = {};
-    fillDTConfig(rfbc, thread_index, dtbc);
+    ml_uint ntrees = (number_of_trees_ / number_of_threads_);
+    ntrees += (thread_index == 0) ? (number_of_trees_ % number_of_threads_) : 0;
 
-    ml_uint ntrees = (rfbc.number_of_trees / rfbc.number_of_threads);
-    ntrees += (thread_index == 0) ? (rfbc.number_of_trees % rfbc.number_of_threads) : 0;
+    decision_tree proto_tree{mlid_, index_of_feature_to_predict_, 
+	max_tree_depth_, min_leaf_instances_, 
+        features_to_consider_per_node_, seed_ + thread_index};
 
-    auto rftc = std::make_shared<rf_thread_config>(thread_index, ntrees, dtbc, mld, mlid);
+    proto_tree.set_name(string_format("[thread %d]", thread_index));
+
+    auto rftc = std::make_shared<rf_thread_config>(thread_index, ntrees, proto_tree, mld);
     thread_configs.push_back(rftc);
-    work_threads.emplace_back(std::thread([rftc] { multiThreaded_buildTree(rftc); }));
+    work_threads.emplace_back(std::thread([rftc] { multi_threaded_work(rftc); }));
   }
 
 
   // wait for all threads to finish
-  for(auto iter=work_threads.begin(); iter != work_threads.end(); ++iter) {
-    (*iter).join();
+  for(auto &thread : work_threads) {
+    thread.join();
   }
+
 						
   // combine trees, out of bag maps, and feature importance
-  for(auto iter=thread_configs.cbegin(); iter != thread_configs.cend(); ++iter) {
+  for(auto &thread_config : thread_configs) {
 
-    auto thread_config = *iter;
     if(thread_config->trees.size() != thread_config->number_of_trees) {
       log_error("some trees failed to build in thread %d\n", thread_config->thread_index);
       return(false);
@@ -276,8 +286,8 @@ static bool multiThreaded_buildRandomForest(const rf_build_config &rfbc, const m
 
     for(ml_uint tree_index = 0; tree_index < thread_config->number_of_trees; ++tree_index) {
       oobs.push_back(thread_config->oobs[tree_index]);
-      forest.trees.push_back(thread_config->trees[tree_index]);
-      collectFeatureImportance(thread_config->trees[tree_index].feature_importance, forest_feature_importance);
+      trees_.push_back(thread_config->trees[tree_index]);
+      collect_feature_importance(thread_config->trees[tree_index].feature_importance(), forest_feature_importance);
     }
 
   }
@@ -285,224 +295,145 @@ static bool multiThreaded_buildRandomForest(const rf_build_config &rfbc, const m
   return(true);
 }
 
-bool buildRandomForest(const ml_instance_definition &mlid, const ml_data &mld, const rf_build_config &rfbc, rf_forest &forest, 
-		       ml_vector<ml_feature_value> *oob_for_mld) {
 
-  if(mlid.empty()) {
-    log_error("invalid instance definition...\n");
+bool random_forest::train(const ml_data &mld) {
+
+  trees_.clear();
+  feature_importance_.clear();
+  oob_predictions_.clear();
+
+  if(mlid_.empty()) {
+    log_error("rf train() invalid instance definition...\n");
     return(false);
   }
 
-  forest.trees.clear();
-  forest.index_of_feature_to_predict = rfbc.index_of_feature_to_predict;
-  forest.type = (mlid[rfbc.index_of_feature_to_predict].type == ML_FEATURE_TYPE_DISCRETE) ? DT_TREE_TYPE_CLASSIFICATION : DT_TREE_TYPE_REGRESSION;
-
   ml_vector<rf_oob_indices> oobs;
   ml_vector<dt_feature_importance> forest_feature_importance;
-  forest_feature_importance.resize(mlid.size());
+  forest_feature_importance.resize(mlid_.size());
 
-  bool forestWasBuilt = (rfbc.number_of_threads <= 1) ? singleThreaded_buildRandomForest(rfbc, mlid, mld, forest, oobs, forest_feature_importance) :
-       multiThreaded_buildRandomForest(rfbc, mlid, mld, forest, oobs, forest_feature_importance);
+  bool forest_was_built = (number_of_threads_ <= 1) ? single_threaded_train(mld, oobs, forest_feature_importance) :
+    multi_threaded_train(mld, oobs, forest_feature_importance);
 
-  if(!forestWasBuilt) {
+  if(!forest_was_built) {
     log_error("hit a snag while building the forest...\n");
     return(false);
   }
 
-  calculateOutOfBagError(mlid, mld, forest, oobs, oob_for_mld);
-  printFeatureImportance(mlid, forest.index_of_feature_to_predict, forest_feature_importance);
+  feature_importance_ = calculate_feature_importance(mlid_, index_of_feature_to_predict_, forest_feature_importance);
+
+  if(evaluate_oob_) {
+    evaluate_out_of_bag(mld, oobs);
+  }
 
   return(true);
 }
 
-static bool evaluateClassificationRandomForestForInstance(const ml_instance_definition &mlid, const rf_forest &forest, 
-							  const ml_instance &instance, ml_feature_value &prediction, 
-							  ml_vector<ml_feature_value> *tree_predictions) {
 
-  if(forest.trees.empty()) {
-    return(false);
-  }
+ml_feature_value random_forest::evaluate(const ml_instance &instance) const {
 
-  ml_map<ml_uint, ml_uint> prediction_map;
+  ml_feature_value rf_eval = {};
 
-  for(std::size_t ii=0; ii < forest.trees.size(); ++ii) {
-    const dt_tree &tree = forest.trees[ii];
-    const ml_feature_value *mlfv = evaluateDecisionTreeForInstance(mlid, tree, instance);
-    if(mlfv) {
-      prediction_map[mlfv->discrete_value_index] += 1;
-      if(tree_predictions) {
-	tree_predictions->push_back(*mlfv);
-      }
-    }
-    else {
-      log_error("decision tree eval failed...\n");
-      return(false);
-    }
-  }
-
-  ml_uint predicted_discrete_value_index = 0;
-  ml_uint predicted_count = 0;
-  for(ml_map<ml_uint, ml_uint>::iterator it = prediction_map.begin(); it != prediction_map.end(); ++it) {
-    if(it->second > predicted_count) {
-      predicted_discrete_value_index = it->first;
-      predicted_count = it->second;
-    }
-  }
-
-  prediction.discrete_value_index = predicted_discrete_value_index;
-
-  return(true);
-}
-
-static bool evaluateRegressionRandomForestForInstance(const ml_instance_definition &mlid, const rf_forest &forest, const ml_instance &instance, 
-						      ml_feature_value &prediction, ml_vector<ml_feature_value> *tree_predictions) {
-
-  if(forest.trees.empty()) {
-    return(false);
+  if(trees_.empty()) {
+    log_warn("evaluate() called on an empty forest\n");
+    return(rf_eval);
   }
 
   ml_double sum = 0;
+  ml_map<ml_uint, ml_uint> prediction_map;  
 
-  for(std::size_t ii=0; ii < forest.trees.size(); ++ii) {
-    const dt_tree &tree = forest.trees[ii];
-    const ml_feature_value *mlfv = evaluateDecisionTreeForInstance(mlid, tree, instance);
-    if(mlfv) {
-      sum += mlfv->continuous_value;
-      if(tree_predictions) {
-	tree_predictions->push_back(*mlfv);
-      }
+  //
+  // evaluate all trees in the forest for the instance
+  //
+  for(const auto &tree : trees_) {
+    ml_feature_value tree_eval = tree.evaluate(instance);
+    if(type_ == ml_model_type::classification) {
+      prediction_map[tree_eval.discrete_value_index] += 1;
     }
     else {
-      log_error("decision tree eval failed...\n");
-      return(false);
+      sum += tree_eval.continuous_value;
     }
   }
 
-  prediction.continuous_value = (ml_float) (sum / forest.trees.size());
+  if(type_ == ml_model_type::classification) {
+    //
+    // classification returns the mode
+    //
+    ml_uint predicted_discrete_value_index = 0;
+    ml_uint predicted_count = 0;
+    // we iterate over all categories in a fixed order so that
+    // ties in voting between categories are broken in a determinate
+    // way (not dependent on the order of iteration within the container)
+    ml_uint categories = mlid_[index_of_feature_to_predict_]->discrete_values.size();
+    for(ml_uint category = 0; category < categories; ++category) {
+      auto it = prediction_map.find(category);
+      if(it == prediction_map.end()) {
+	continue;
+      }
 
-  return(true);
-}
-
-bool evaluateRandomForestForInstance(const ml_instance_definition &mlid, const rf_forest &forest, const ml_instance &instance, 
-				     ml_feature_value &prediction, ml_vector<ml_feature_value> *tree_predictions) {
-  if(tree_predictions) {
-    tree_predictions->clear();
-  }
-
-  if(forest.type == DT_TREE_TYPE_CLASSIFICATION) {
-    return(evaluateClassificationRandomForestForInstance(mlid, forest, instance, prediction, tree_predictions));
-  }
-
-  return(evaluateRegressionRandomForestForInstance(mlid, forest, instance, prediction, tree_predictions));
-}
-
-void printRandomForestResultsForData(const ml_instance_definition &mlid, const ml_data &mld, const rf_forest &forest) {
- 
-  ml_classification_results mlcr = {};
-  ml_regression_results mlrr = {};
-
-  for(std::size_t instance_index=0; instance_index < mld.size(); ++instance_index) {
-    
-    ml_feature_value prediction;
-    if(evaluateRandomForestForInstance(mlid, forest, *mld[instance_index], prediction)) {
-      switch(forest.type) {
-      case DT_TREE_TYPE_CLASSIFICATION: collectClassificationResultForInstance(mlid, forest.index_of_feature_to_predict, *mld[instance_index], &prediction, mlcr); break;
-      case DT_TREE_TYPE_REGRESSION: collectRegressionResultForInstance(mlid, forest.index_of_feature_to_predict, *mld[instance_index], &prediction, mlrr); break;
-      default: break;
+      if(it->second > predicted_count) {
+	predicted_discrete_value_index = it->first;
+	predicted_count = it->second;
       }
     }
-    
-  } 
 
-  switch(forest.type) {
-  case DT_TREE_TYPE_CLASSIFICATION: printClassificationResultsSummary(mlid, forest.index_of_feature_to_predict, mlcr); break;
-  case DT_TREE_TYPE_REGRESSION: printRegressionResultsSummary(mlrr); break;
-  default: break;
+    rf_eval.discrete_value_index = predicted_discrete_value_index;
   }
+  else {
+    //
+    // regression returns the mean
+    //
+    rf_eval.continuous_value = sum / trees_.size();
+  }
+  
+
+  return(rf_eval);
 }
 
-static cJSON *createJSONObjectWithBaseInfoFromRandomForest(const rf_forest &forest) {
-  //
-  // the trees are stored elsewhere as separate json files in the chosen rf directory
-  //
-  cJSON *json_forest = cJSON_CreateObject();
-  cJSON_AddStringToObject(json_forest, "object", "rf_forest");
-  cJSON_AddNumberToObject(json_forest, "type", forest.type);
-  cJSON_AddNumberToObject(json_forest, "index_of_feature_to_predict", forest.index_of_feature_to_predict);
-  return(json_forest);
-}
 
-static bool fillRandomForestWithBaseInfoFromJSONObject(cJSON *json_object, rf_forest &forest) {
+bool random_forest::write_random_forest_base_info_to_file(const ml_string &path) const {
 
-  if(!json_object) {
-    log_error("nil json object...\n");
-    return(false);
-  }
-
-  cJSON *object = cJSON_GetObjectItem(json_object, "object");
-  if(!object || !object->valuestring || strcmp(object->valuestring, "rf_forest")) {
-    log_error("json object is not a random forest...\n");
-    return(false);
-  }
-
-  cJSON *type = cJSON_GetObjectItem(json_object, "type");
-  if(!type || (type->type != cJSON_Number)) {
-    log_error("json object is missing forest type\n");
-    return(false);
-  }
-
-  forest.type = (dt_tree_type) type->valueint;
-
-  cJSON *index = cJSON_GetObjectItem(json_object, "index_of_feature_to_predict");
-  if(!index || (index->type != cJSON_Number)) {
-    log_error("json object is missing the index of the feature to predict\n");
-    return(false);
-  }
-
-  forest.index_of_feature_to_predict = index->valueint;
-
-  return(true);
-}
-
-static bool writeRandomForestBaseInfoToFile(const ml_string &path_to_file, const rf_forest &forest) {
-  cJSON *json_object = createJSONObjectWithBaseInfoFromRandomForest(forest);
+  cJSON *json_object = cJSON_CreateObject();
   if(!json_object) {
     log_error("couldn't create json object from random forest\n");
     return(false);
   }
 
-  bool status = writeModelJSONToFile(path_to_file, json_object);
+  cJSON_AddStringToObject(json_object, "object", "random_forest");
+  cJSON_AddNumberToObject(json_object, "type", (double)type_);
+  cJSON_AddNumberToObject(json_object, "index_of_feature_to_predict", index_of_feature_to_predict_);
+  cJSON_AddNumberToObject(json_object, "number_of_trees", number_of_trees_);
+  cJSON_AddNumberToObject(json_object, "seed", seed_);
+  cJSON_AddNumberToObject(json_object, "number_of_threads", number_of_threads_);
+  cJSON_AddNumberToObject(json_object, "max_tree_depth", max_tree_depth_);
+  cJSON_AddNumberToObject(json_object, "min_leaf_instances", min_leaf_instances_);
+  cJSON_AddNumberToObject(json_object, "features_to_consider_per_node", features_to_consider_per_node_);
+  cJSON_AddNumberToObject(json_object, "evaluate_oob", evaluate_oob_);
+
+  bool status = write_model_json_to_file(path, json_object);
   cJSON_Delete(json_object);
 
   return(status);
 }
 
-static bool readRandomForestBaseInfoFromFile(const ml_string &path_to_file, rf_forest &forest) {
-  cJSON *json_object = readModelJSONFromFile(path_to_file);
-  if(!json_object) {
-    log_error("couldn't load random forest json object from model file: %s\n", path_to_file.c_str());
+
+bool random_forest::save(const ml_string &path) const {
+
+  if(mlid_.empty()) {
     return(false);
   }
 
-  bool status = fillRandomForestWithBaseInfoFromJSONObject(json_object, forest);
-  cJSON_Delete(json_object);
-
-  return(status);
-}
-
-
-bool writeRandomForestToDirectory(const ml_string &path_to_dir, const ml_instance_definition &mlid, const rf_forest &forest, bool overwrite_existing) {
-  
-  prepareDirectoryForModelSave(path_to_dir, overwrite_existing);
+  if(!prepare_directory_for_model_save(path)) {
+    return(false);
+  }
 
   // write the instance definition
-  if(!writeInstanceDefinitionToFile(path_to_dir + "/" + RF_MLID_FILE, mlid)) {
+  if(!write_instance_definition_to_file(path + "/" + RF_MLID_FILE, mlid_)) {
     log_error("couldn't write rf instance definition to %s\n", RF_MLID_FILE.c_str());
     return(false);
   }
 
   // store the forest type, index to predict, etc
-  if(!writeRandomForestBaseInfoToFile(path_to_dir + "/" + RF_BASEINFO_FILE, forest)) {
+  if(!write_random_forest_base_info_to_file(path + "/" + RF_BASEINFO_FILE)) {
     log_error("couldn't write rf info to %s\n", RF_BASEINFO_FILE.c_str());
     return(false);
   }
@@ -510,13 +441,12 @@ bool writeRandomForestToDirectory(const ml_string &path_to_dir, const ml_instanc
   std::time_t timestamp = std::time(0); 
 
   // each tree is written to its own file
-  for(std::size_t ii = 0; ii < forest.trees.size(); ++ii) {
-    std::ostringstream ss;
+  for(std::size_t ii = 0; ii < trees_.size(); ++ii) {
     // we use the timestamp in the filename to make it easier to consolidate trees from multiple runs.
     // for example, tree1.1457973944.json
-    ss << path_to_dir << "/" << puml::TREE_MODEL_FILE_PREFIX << (ii+1) << "." << timestamp << ".json";
-    if(!writeDecisionTreeToFile(ss.str(), forest.trees[ii])) {
-      log_error("couldn't write tree to file: %s\n", ss.str().c_str());
+    ml_string filename = path + "/" + puml::TREE_MODEL_FILE_PREFIX + std::to_string(ii+1) + "." + std::to_string(timestamp) + ".json";
+    if(!trees_[ii].save(filename, true)) {
+      log_error("couldn't write tree to file: %s\n", filename.c_str());
       return(false);
     }
   }
@@ -525,22 +455,96 @@ bool writeRandomForestToDirectory(const ml_string &path_to_dir, const ml_instanc
   
 }
 
-bool readRandomForestFromDirectory(const ml_string &path_to_dir, ml_instance_definition &mlid, rf_forest &forest) {
 
-  if(!readInstanceDefinitionFromFile(path_to_dir + "/" + RF_MLID_FILE, mlid)) {
-    log_error("couldn't read rf instance defintion\n");
+bool random_forest::read_random_forest_base_info_from_file(const ml_string &path) {
+  cJSON *json_object = read_model_json_from_file(path);
+  if(!json_object) {
+    log_error("couldn't load random forest json object from model file: %s\n", path.c_str());
     return(false);
   }
 
-  if(!readRandomForestBaseInfoFromFile(path_to_dir + "/" + RF_BASEINFO_FILE, forest)) {
-    log_error("couldn't read rf base info\n");
+  cJSON *object = cJSON_GetObjectItem(json_object, "object");
+  if(!object || !object->valuestring || strcmp(object->valuestring, "random_forest")) {
+    log_error("json object is not a random forest...\n");
     return(false);
   }
 
-  readDecisionTreesFromDirectory(path_to_dir, forest.trees);
+  if(!(get_modeltype_value_from_json(json_object, "type", type_) &&
+       get_numeric_value_from_json(json_object, "index_of_feature_to_predict", index_of_feature_to_predict_) &&
+       get_numeric_value_from_json(json_object, "number_of_trees", number_of_trees_) && 
+       get_numeric_value_from_json(json_object, "seed", seed_) &&
+       get_numeric_value_from_json(json_object, "number_of_threads", number_of_threads_) &&
+       get_numeric_value_from_json(json_object, "max_tree_depth", max_tree_depth_) &&
+       get_numeric_value_from_json(json_object, "min_leaf_instances", min_leaf_instances_) &&
+       get_numeric_value_from_json(json_object, "features_to_consider_per_node", features_to_consider_per_node_) &&
+       get_bool_value_from_json(json_object, "evaluate_oob", evaluate_oob_))) {
+    return(false);
+  }
+
+  cJSON_Delete(json_object);
 
   return(true);
 }
 
+
+bool random_forest::restore(const ml_string &path) {
+  
+  if(!read_instance_definition_from_file(path + "/" + RF_MLID_FILE, mlid_)) {
+    log_error("couldn't read rf instance defintion\n");
+    return(false);
+  }
+
+  if(!read_random_forest_base_info_from_file(path + "/" + RF_BASEINFO_FILE)) {
+    log_error("couldn't read rf base info\n");
+    return(false);
+  }
+
+  if(!read_decision_trees_from_directory(path, mlid_, trees_)) {
+    return(false);
+  }
+
+  return(true);
+}
+
+
+ml_string random_forest::summary() const {
+
+  if(mlid_.empty() || trees_.empty()) {
+    return("(empty forest)\n");
+  }
+
+  ml_string desc;
+  desc += "\n\n*** Random Forest Summary ***\n\n";
+  desc += "Feature To Predict: " + mlid_[index_of_feature_to_predict_]->name + "\n";
+  ml_string type_str = (type_ == ml_model_type::regression) ? "regression" : "classification";
+  desc += "Type: " + type_str;
+  desc += ", Trees: " + std::to_string(number_of_trees_);
+  desc += ", Threads: " + std::to_string(number_of_threads_);
+  desc += ", Max Depth: " + std::to_string(max_tree_depth_);
+  desc += ", Min Leaf Instances: " + std::to_string(min_leaf_instances_);
+  desc += ", Features p/n: " + std::to_string(features_to_consider_per_node_);
+  desc += ", Seed: " + std::to_string(seed_);
+  desc += ", Eval Out-Of-Bag: " + std::to_string(evaluate_oob_);
+  desc += "\n";
+  desc += feature_importance_summary(); 
+
+  return(desc);
+}
+
+
+ml_string random_forest::feature_importance_summary() const {
+
+  if(feature_importance_.empty()) {
+    return("");
+  }
+
+  ml_string desc = "\n*** Feature Importance ***\n\n";
+  for(const auto &importance_tuple : feature_importance_) {
+    desc += std::get<1>(importance_tuple) + "\n";
+  }
+
+  return(desc);
+}
+ 
 
 } // namespace puml

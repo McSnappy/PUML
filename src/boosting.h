@@ -26,79 +26,78 @@ SOFTWARE.
 
 namespace puml {
 
-typedef ml_double (*boostedLossFunc)(ml_double yi, ml_double yhat);
-typedef ml_double (*boostedGradientFunc)(ml_double yi, ml_double yhat);
+using boosted_progress_callback = std::function<bool (ml_uint iteration)>;
+using boosted_loss_func = std::function<ml_double (ml_double yi, ml_double yhat)>;
+using boosted_gradient_func = std::function<ml_double (ml_double yi, ml_double yhat)>;
 
-typedef struct {
 
-  ml_float learning_rate;
-  ml_uint number_of_trees;
-  ml_uint index_of_feature_to_predict; // see ml_indexOfFeatureWithName()
-  ml_uint features_to_consider_per_node; // 0 to consider all features
-  ml_uint max_tree_depth; 
-  ml_uint min_leaf_instances;
-  ml_uint seed; // 0 to seed using the clock
-  ml_float subsample; // 0.5 to build each tree using 50% of the data randomly sampled
+class boosted_trees final {
+
+ public:
+
+  static const ml_uint BT_DEFAULT_DEPTH = 4;
+  static constexpr ml_float BT_DEFAULT_SUBSAMPLE_HALF = 0.5;
+  static const ml_uint BT_DEFAULT_FEATURES_HALF = 0; 
+  static const ml_uint BT_DEFAULT_MININST = 2;
+
+  boosted_trees(const ml_string &path) { restore(path); }
+
+  boosted_trees(const ml_instance_definition &mlid,
+		const ml_string &feature_to_predict,
+		ml_uint number_of_trees,
+		ml_float learning_rate,
+		ml_uint seed = ML_DEFAULT_SEED,
+		ml_uint max_tree_depth = BT_DEFAULT_DEPTH,
+		ml_float subsample = BT_DEFAULT_SUBSAMPLE_HALF,
+		ml_uint min_leaf_instances = BT_DEFAULT_MININST,
+		ml_uint features_to_consider = BT_DEFAULT_FEATURES_HALF);
+
+  bool save(const ml_string &path) const;
+  bool restore(const ml_string &path);
+
+  bool train(const ml_data &mld);
+  ml_feature_value evaluate(const ml_instance &instance) const;
+
+  ml_string summary() const;
+  
+  const ml_instance_definition &mlid() const { return(mlid_); }
+  ml_uint index_of_feature_to_predict() const { return(index_of_feature_to_predict_); }
+  ml_model_type type() const { return(type_); }
+
+  void set_progress_callback(boosted_progress_callback callback) { progress_callback_ = callback; }
+  void set_loss_func(boosted_loss_func loss_func) { loss_func_ = loss_func; }
+  void set_gradient_func(boosted_gradient_func grad_func) { gradient_func_ = grad_func; }
+  
+
+ private:
+  
+  // build parameters
+  ml_instance_definition mlid_;
+  ml_uint index_of_feature_to_predict_ = 0;
+  ml_uint number_of_trees_ = 0;
+  ml_float learning_rate_ = 0;
+  ml_uint seed_ = ML_DEFAULT_SEED;  
+  ml_uint max_tree_depth_ = BT_DEFAULT_DEPTH; 
+  ml_float subsample_ = BT_DEFAULT_SUBSAMPLE_HALF;
+  ml_uint min_leaf_instances_ = BT_DEFAULT_MININST;
+  ml_uint features_to_consider_per_node_ = BT_DEFAULT_FEATURES_HALF;
 
   // loss defaults to squared error unless overridden
-  boostedLossFunc lossFunc; 
-  boostedGradientFunc gradientFunc;
+  boosted_loss_func loss_func_ = nullptr; 
+  boosted_gradient_func gradient_func_ = nullptr;
 
-} boosted_build_config;
+  // ensemble structure
+  ml_model_type type_;
+  ml_vector<decision_tree> trees_;
 
+  // optional progress callback excercised after each iteration.
+  // return false to stop training
+  boosted_progress_callback progress_callback_ = nullptr;
 
-typedef struct {
-
-  ml_uint index_of_feature_to_predict;
-  ml_float learning_rate;
-  dt_tree_type type;
-  ml_vector<dt_tree> trees;
-
-} boosted_trees;
-
-
-//
-// buildBoostedTrees will use the callback after each iteration. return false to stop building trees
-//
-typedef bool (*boostedBuildCallback)(const ml_instance_definition &mlid, const boosted_trees &bt, ml_uint iteration, void *user);
-
-
-//
-// NOTE: Implemented for regression only
-//
-// Build the boosted ensemble given instance definition, training data, and boosted build config. 
-// Optional progress callback allows periodic validation scoring and early exit.
-// returns true on success
-//
-bool buildBoostedTrees(const ml_instance_definition &mlid, const boosted_build_config &bbc,
-		       const ml_data &mld, boosted_trees &bt, 
-		       boostedBuildCallback callback = nullptr, void *user = nullptr);
-
-
-//
-// Evaluates the instance over each tree in the ensemble scaled by the shrinkage parameter.
-// Use the continuous_value of the predicted ml_feature_value 
-//
-// returns true on success, otherwise false
-//
-bool evaluateBoostedTreesForInstance(const ml_instance_definition &mlid, const boosted_trees &bt, 
-				     const ml_instance &instance, ml_feature_value &prediction);
-
-
-//
-// Evaluates every instance in mld and prints the regression summary
-//
-void printBoostedTreesResultsForData(const ml_instance_definition &mlid, 
-				     const ml_data &mld, const boosted_trees &bt);
-
-
-//
-// Read/Write Boosted Trees ensemble to disk, including the instance definition (JSON) 
-//
-bool writeBoostedTreesToDirectory(const ml_string &path_to_dir, const ml_instance_definition &mlid, 
-				  const boosted_trees &bt, bool overwrite_existing = true);
-bool readBoostedTreesFromDirectory(const ml_string &path_to_dir, ml_instance_definition &mlid, boosted_trees &bt);
-
+  // implementation
+  bool read_boosted_trees_base_info_from_file(const ml_string &path);
+  bool write_boosted_trees_base_info_to_file(const ml_string &path) const;
+};
 
 
 } // namespace puml

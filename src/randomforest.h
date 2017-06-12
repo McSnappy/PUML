@@ -26,71 +26,86 @@ SOFTWARE.
 
 namespace puml {
 
-typedef struct {
-
-  ml_uint number_of_threads; 
-  ml_uint number_of_trees;
-  ml_uint index_of_feature_to_predict; // see ml_indexOfFeatureWithName()
-  ml_uint min_leaf_instances;
-  ml_uint max_tree_depth; 
-  ml_uint max_continuous_feature_splits; // 0 to consider all splits [experimental, see decisiontree.h]
-  ml_uint features_to_consider_per_node; // 0 to consider all features
-  ml_uint seed;
-
-} rf_build_config;
+using rf_oob_indices = ml_set<ml_uint>;
+using feature_importance_tuple = std::tuple<ml_uint, ml_string>; 
 
 
-typedef struct {
+class random_forest final {
 
-  ml_uint index_of_feature_to_predict;
-  dt_tree_type type;
-  ml_vector<dt_tree> trees;
+ public:
 
-} rf_forest;
+  static const ml_uint RF_DEFAULT_THREADS = 2;
+  static const ml_uint RF_DEFAULT_DEPTH = 50;
+  static const ml_uint RF_DEFAULT_MININST = 2;
+  static const ml_uint RF_DEFAULT_FEATURES_SQRT = 0;
 
+  random_forest(const ml_string &path) { restore(path); }
 
-//
-// Build the forest given instance definition, training data, and forest build config. 
-// oob_for_mld is an optional parameter that will be populated with the out of bag
-// prediction for each instance in the training data.
-//
-// returns true on success
-//
-bool buildRandomForest(const ml_instance_definition &mlid, const ml_data &mld, const rf_build_config &rfbc, 
-		       rf_forest &forest, ml_vector<ml_feature_value> *oob_for_mld = nullptr);
+  random_forest(const ml_instance_definition &mlid,
+		const ml_string &feature_to_predict,
+		ml_uint number_of_trees,
+		ml_uint seed = ML_DEFAULT_SEED,
+		ml_uint number_of_threads = RF_DEFAULT_THREADS,
+		ml_uint max_tree_depth = RF_DEFAULT_DEPTH, 
+		ml_uint min_leaf_instances = RF_DEFAULT_MININST,
+		ml_uint features_to_consider_per_node = RF_DEFAULT_FEATURES_SQRT);
 
+  bool save(const ml_string &path) const;
+  bool restore(const ml_string &path);
+		
+  bool train(const ml_data &mld);
+  ml_feature_value evaluate(const ml_instance &instance) const;
 
+  ml_string summary() const;
+  ml_string feature_importance_summary() const;
 
-//
-// Evaluates the instance over each tree in the forest and returns the average for regression, 
-// or majority vote for classification. 
-//
-// Use the continuous_value of the predicted ml_feature_value if this is a regression tree,
-// and use the discrete_value_index for classification trees. See dt_evaluateDecisionTreeForInstance()
-// for details on how to map discrete_value_index to the actual category name.
-//
-// tree_predictions is an optional parameter that will be populated with the predicted ml_feature_value 
-// for the given instance from each tree in the forest.
-//
-// returns true on success
-//
-bool evaluateRandomForestForInstance(const ml_instance_definition &mlid, const rf_forest &forest, const ml_instance &instance, 
-				     ml_feature_value &prediction, ml_vector<ml_feature_value> *tree_predictions = nullptr);
+  const ml_instance_definition &mlid() const { return(mlid_); }
+  const ml_vector<decision_tree> &trees() const { return(trees_); }
+  const ml_vector<ml_feature_value> &oob_predictions() const { return(oob_predictions_); }
+  ml_uint index_of_feature_to_predict() const { return(index_of_feature_to_predict_); }
+  ml_model_type type() const { return(type_); }
 
+  void set_seed(ml_uint seed) { seed_ = seed;}
+  void set_number_of_trees(ml_uint ntrees) { number_of_trees_ = ntrees; }
+  void set_number_of_threads(ml_uint nthreads) { number_of_threads_ = nthreads; }
+  void set_evaluate_oob(bool eval_oob) { evaluate_oob_ = eval_oob; }
+  void set_trees(const ml_vector<decision_tree> &trees);
 
-//
-// Evaluates every instance in mld and prints the regression or classification summary
-//
-void printRandomForestResultsForData(const ml_instance_definition &mlid, const ml_data &mld, const rf_forest &forest);
+ private:
 
+  // forest build parameters
+  ml_instance_definition mlid_;
+  ml_uint index_of_feature_to_predict_ = 0;
+  ml_uint number_of_trees_ = 0;
+  ml_uint seed_ = ML_DEFAULT_SEED;
+  ml_uint number_of_threads_ = 0; 
+  ml_uint max_tree_depth_ = 0; 
+  ml_uint min_leaf_instances_ = 0;
+  ml_uint features_to_consider_per_node_ = 0;
+  bool evaluate_oob_ = false;
 
-//
-// Read/Write Random Forest to disk, including the instance definition (JSON) 
-//
-bool writeRandomForestToDirectory(const ml_string &path_to_dir, const ml_instance_definition &mlid, 
-				     const rf_forest &forest, bool overwrite_existing = true);
-bool readRandomForestFromDirectory(const ml_string &path_to_dir, ml_instance_definition &mlid, rf_forest &forest);
+  // forest structure
+  ml_model_type type_;
+  ml_vector<decision_tree> trees_;
 
+  // feature importance & out-of-bag error
+  // (available after train(). neither are saved/restored)
+  ml_vector<feature_importance_tuple> feature_importance_;
+  ml_vector<ml_feature_value> oob_predictions_;
+
+  // implementation
+  bool single_threaded_train(const ml_data &mld, 
+			     ml_vector<rf_oob_indices> &oobs, 
+			     ml_vector<dt_feature_importance> &forest_feature_importance);
+
+  bool multi_threaded_train(const ml_data &mld, 
+			    ml_vector<rf_oob_indices> &oobs, 
+			    ml_vector<dt_feature_importance> &forest_feature_importance);
+
+  bool write_random_forest_base_info_to_file(const ml_string &path) const;
+  bool read_random_forest_base_info_from_file(const ml_string &path);
+  void evaluate_out_of_bag(const ml_data &mld, const ml_vector<rf_oob_indices> &oobs);
+};
 
 
 } // namespace puml

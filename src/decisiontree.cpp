@@ -20,36 +20,74 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-#include <string.h>
-#include <stdlib.h>
-#include <math.h>
 #include <algorithm>
-#include <limits>
-#include <sstream>
 #include <chrono>
-#include <unordered_set>
+#include <limits>
+#include <map>
+#include <math.h>
+#include <sstream>
+#include <stdlib.h>
+#include <string.h>
 
 #include "decisiontree.h"
+#include "mlutil.h"
 
 namespace puml {
+
+static const ml_string &DT_TREE_JSONFILE = "tree.json";
+static const ml_string &DT_MLID_JSONFILE = "mlid.json";
+static const ml_double DT_COMPARISON_EQUAL_TOL = 0.00000001;
 
 struct dt_split {
   ml_uint split_feature_index;
   ml_feature_type split_feature_type;
   ml_feature_value split_feature_value;
-  dt_comparison_operator split_left_op = DT_COMPARISON_OP_NOOP;
-  dt_comparison_operator split_right_op = DT_COMPARISON_OP_NOOP;
+  dt_comparison_op split_left_op = dt_comparison_op::noop;
+  dt_comparison_op split_right_op = dt_comparison_op::noop;
   ml_double left_score = 0;
   ml_double right_score = 0;
 };
 
 
+decision_tree::decision_tree(const ml_instance_definition &mlid, 
+			     const ml_string &feature_to_predict, 
+			     ml_uint max_tree_depth, ml_uint min_leaf_instances, 
+			     ml_uint features_to_consider_per_node, 
+			     ml_uint seed,
+			     bool keep_instances_at_leaf_nodes) :
+  mlid_(mlid),
+  index_of_feature_to_predict_(index_of_feature_with_name(feature_to_predict, mlid)),
+  max_tree_depth_(max_tree_depth),
+  min_leaf_instances_(min_leaf_instances),
+  features_to_consider_per_node_(features_to_consider_per_node),
+  seed_(seed),
+  keep_instances_at_leaf_nodes_(keep_instances_at_leaf_nodes),
+  rng_(seed_) {
+  type_ = (mlid_[index_of_feature_to_predict_]->type == ml_feature_type::discrete) ? ml_model_type::classification : ml_model_type::regression;
+}
 
-static const ml_double DT_COMPARISON_EQUAL_TOL = 0.00000001;
 
-static bool validateInput(const ml_instance_definition &mlid, const ml_data &mld, const dt_build_config &dtbc) {
+decision_tree::decision_tree(const ml_instance_definition &mlid, 
+			     ml_uint index_of_feature_to_predict, 
+			     ml_uint max_tree_depth, ml_uint min_leaf_instances, 
+			     ml_uint features_to_consider_per_node, 
+			     ml_uint seed,
+			     bool keep_instances_at_leaf_nodes) :
+  mlid_(mlid),
+  index_of_feature_to_predict_(index_of_feature_to_predict),
+  max_tree_depth_(max_tree_depth),
+  min_leaf_instances_(min_leaf_instances),
+  features_to_consider_per_node_(features_to_consider_per_node),
+  seed_(seed),
+  keep_instances_at_leaf_nodes_(keep_instances_at_leaf_nodes),
+  rng_(seed_) {
+  type_ = (mlid_[index_of_feature_to_predict_]->type == ml_feature_type::discrete) ? ml_model_type::classification : ml_model_type::regression;
+}
 
-  if(mlid.empty()) {
+
+bool decision_tree::validate_for_training(const ml_data &mld) {
+
+  if(mlid_.empty()) {
     log_error("empty instance definition...\n");
     return(false);
   }
@@ -59,30 +97,26 @@ static bool validateInput(const ml_instance_definition &mlid, const ml_data &mld
     return(false);
   }
 
-  if(mld[0]->size() < mlid.size()) {
+  if(mld[0]->size() < mlid_.size()) {
     log_error("feature count mismatch b/t instance definition and instance data\n");
     return(false);
   }
 
-  if(dtbc.index_of_feature_to_predict >= mlid.size()) {
+  if(index_of_feature_to_predict_ >= mlid_.size()) {
     log_error("invalid index of feature to predict...\n");
     return(false);
   }
 
-  if(dtbc.min_leaf_instances == 0) {
+  if(min_leaf_instances_ == 0) {
     log_error("minimum leaf instances must be greater than 0\n");
-    return(false);
-  }
-
-  if(((dtbc.max_continuous_feature_splits > 0) || (dtbc.features_to_consider_per_node > 0)) && !dtbc.rng_config) {
-    log_error("missing rng_config...\n");
     return(false);
   }
 
   return(true);  
 }
 
-static ml_double calcMeanForContinuousFeature(ml_uint feature_index, const ml_data &mld) {
+
+static ml_double calc_mean_for_continuous_feature(ml_uint feature_index, const ml_data &mld) {
 
   if(mld.empty()) {
     return(0.0);
@@ -97,9 +131,10 @@ static ml_double calcMeanForContinuousFeature(ml_uint feature_index, const ml_da
   return(mean);
 }
 
-static ml_uint calcModeValueIndexForDiscreteFeature(ml_uint feature_index, const ml_data &mld) {
 
-  ml_map<ml_uint, ml_uint> value_map;
+static ml_uint calc_mode_value_index_for_discrete_feature(ml_uint feature_index, const ml_data &mld) {
+
+  std::map<ml_uint, ml_uint> value_map;
 
   for(const auto &inst_ptr : mld) {
     ml_uint discrete_value_index = (*inst_ptr)[feature_index].discrete_value_index;
@@ -117,28 +152,31 @@ static ml_uint calcModeValueIndexForDiscreteFeature(ml_uint feature_index, const
   return(mindex);
 }
 
-static bool continuousFeatureSatisfiesConstraint(const ml_feature_value &feature_value, const ml_feature_value &split_feature_value, dt_comparison_operator op) {
+
+static bool continuous_feature_satisfies_constraint(const ml_feature_value &feature_value, const ml_feature_value &split_feature_value, dt_comparison_op op) {
   switch(op) {
-  case DT_COMPARISON_OP_LESSTHANOREQUAL: return((feature_value.continuous_value < split_feature_value.continuous_value)); break; // OREQUAL, ha...
-  case DT_COMPARISON_OP_GREATERTHAN: return((feature_value.continuous_value > split_feature_value.continuous_value)); break; 
+  case dt_comparison_op::lessthanorequal: return((feature_value.continuous_value < split_feature_value.continuous_value)); break; // OREQUAL, ha...
+  case dt_comparison_op::greaterthan: return((feature_value.continuous_value > split_feature_value.continuous_value)); break; 
   default: log_error("confused by invalid split comparison operator %d (cont)... exiting.\n", op); exit(1); break;
   }
 
   return(false);
 }
 
-static bool discreteFeatureSatisfiesConstraint(const ml_feature_value &feature_value, const ml_feature_value &split_feature_value, dt_comparison_operator op) {
+
+static bool discrete_feature_satisfies_constraint(const ml_feature_value &feature_value, const ml_feature_value &split_feature_value, dt_comparison_op op) {
   switch(op) {
-  case DT_COMPARISON_OP_EQUAL: return((feature_value.discrete_value_index == split_feature_value.discrete_value_index)); break;
-  case DT_COMPARISON_OP_NOTEQUAL: return((feature_value.discrete_value_index != split_feature_value.discrete_value_index)); break;
+  case dt_comparison_op::equal: return((feature_value.discrete_value_index == split_feature_value.discrete_value_index)); break;
+  case dt_comparison_op::notequal: return((feature_value.discrete_value_index != split_feature_value.discrete_value_index)); break;
   default: log_error("confused by invalid split comparison operator %d (disc)... exiting.\n", op); exit(1); break;
   }
 
   return(false);
 }
 
-static bool instanceSatisfiesLeftConstraintOfSplit(const ml_instance &instance, ml_uint split_feature_index, ml_feature_type split_feature_type, 
-						   const ml_feature_value &split_feature_value, dt_comparison_operator split_left_op) {
+
+static bool instance_satisfies_constraint_of_split(const ml_instance &instance, ml_uint split_feature_index, ml_feature_type split_feature_type, 
+						   const ml_feature_value &split_feature_value, dt_comparison_op split_op) {
  
   if(split_feature_index >= instance.size()) {
     log_error("invalid split feature index: %d. exiting\n", split_feature_index); 
@@ -148,21 +186,22 @@ static bool instanceSatisfiesLeftConstraintOfSplit(const ml_instance &instance, 
   const ml_feature_value &mlfv = instance[split_feature_index];
 
   switch(split_feature_type) {
-  case ML_FEATURE_TYPE_CONTINUOUS: return(continuousFeatureSatisfiesConstraint(mlfv, split_feature_value, split_left_op)); break;
-  case ML_FEATURE_TYPE_DISCRETE: return(discreteFeatureSatisfiesConstraint(mlfv, split_feature_value, split_left_op)); break;
+  case ml_feature_type::continuous: return(continuous_feature_satisfies_constraint(mlfv, split_feature_value, split_op)); break;
+  case ml_feature_type::discrete: return(discrete_feature_satisfies_constraint(mlfv, split_feature_value, split_op)); break;
   default: log_error("confused by split feature type... exiting.\n"); exit(1); break;
   }
     
   return(false);
 }
 
-static void performSplit(const ml_data &mld, const dt_split &split, ml_data &leftmld, ml_data &rightmld) {
+
+static void perform_split(const ml_data &mld, const dt_split &split, ml_data &leftmld, ml_data &rightmld) {
  
   leftmld.reserve(mld.size());
   rightmld.reserve(mld.size());
 
   for(const auto &inst_ptr : mld) {
-    if(instanceSatisfiesLeftConstraintOfSplit(*inst_ptr, split.split_feature_index, split.split_feature_type, split.split_feature_value, split.split_left_op)) {
+    if(instance_satisfies_constraint_of_split(*inst_ptr, split.split_feature_index, split.split_feature_type, split.split_feature_value, split.split_left_op)) {
       leftmld.push_back(inst_ptr);
     }
     else {
@@ -171,13 +210,14 @@ static void performSplit(const ml_data &mld, const dt_split &split, ml_data &lef
   }
 }
 
-static void addSplitsForDiscreteFeature(ml_uint feature_index, const ml_data &mld, ml_vector<dt_split> &splits) {
+
+static void add_splits_for_discrete_feature(ml_uint feature_index, const ml_data &mld, ml_vector<dt_split> &splits) {
   
   if(mld.empty()) {
     return;
   }
 
-  std::unordered_set<ml_uint> levels;
+  ml_set<ml_uint> levels;
   for(const auto &inst_ptr : mld) {
     ml_uint level = (*inst_ptr)[feature_index].discrete_value_index;
     levels.insert(level);
@@ -191,7 +231,7 @@ static void addSplitsForDiscreteFeature(ml_uint feature_index, const ml_data &ml
   }
 
   // 
-  // if 2 levels are present remove one since checking both is redundant 
+  // if only 2 levels are present remove one since checking both is redundant 
   //
   if(levels.size() == 2) {
     levels.erase(levels.begin());
@@ -200,16 +240,17 @@ static void addSplitsForDiscreteFeature(ml_uint feature_index, const ml_data &ml
   for(const ml_uint &level : levels) {
     dt_split dsplit{};
     dsplit.split_feature_index = feature_index;
-    dsplit.split_feature_type = ML_FEATURE_TYPE_DISCRETE;
+    dsplit.split_feature_type = ml_feature_type::discrete;
     dsplit.split_feature_value.discrete_value_index = level;
-    dsplit.split_right_op = DT_COMPARISON_OP_EQUAL;
-    dsplit.split_left_op = DT_COMPARISON_OP_NOTEQUAL;
+    dsplit.split_right_op = dt_comparison_op::equal;
+    dsplit.split_left_op = dt_comparison_op::notequal;
     splits.push_back(dsplit);
   }
   
 }
 
-static void addSplitsForContinuousFeature(ml_uint feature_index, const ml_data &mld, ml_vector<dt_split> &splits) {
+
+static void add_splits_for_continuous_feature(ml_uint feature_index, const ml_data &mld, ml_vector<dt_split> &splits) {
 
   // 
   // add splits based on the distribution of the feature in mld
@@ -234,9 +275,9 @@ static void addSplitsForContinuousFeature(ml_uint feature_index, const ml_data &
 
   dt_split csplit{};
   csplit.split_feature_index = feature_index;
-  csplit.split_feature_type = ML_FEATURE_TYPE_CONTINUOUS;
-  csplit.split_right_op = DT_COMPARISON_OP_GREATERTHAN;
-  csplit.split_left_op = DT_COMPARISON_OP_LESSTHANOREQUAL;
+  csplit.split_feature_type = ml_feature_type::continuous;
+  csplit.split_right_op = dt_comparison_op::greaterthan;
+  csplit.split_left_op = dt_comparison_op::lessthanorequal;
   
   csplit.split_feature_value.continuous_value = mean;
   splits.push_back(csplit);    
@@ -256,18 +297,20 @@ static void addSplitsForContinuousFeature(ml_uint feature_index, const ml_data &
 // score regions for regression using residual sum of squares (approx)
 // returns a tuple with (left region score, right region score, combined score)
 //
-static std::tuple<ml_double, ml_double, ml_double> scoreRegionsWithSplitForRegression(const ml_data &mld, const dt_split &split, const dt_tree &tree) {
+static std::tuple<ml_double, ml_double, ml_double> score_regions_with_split_for_regression(const ml_data &mld, 
+											   const dt_split &split, 
+											   const decision_tree &tree) {
 
   ml_double lscore = 0, rscore = 0, combined_score = 0;
   ml_uint n_left = 0, n_right = 0;
   ml_double mean_left = 0, mean_right = 0;
-
+  
   for(const auto &inst_ptr : mld) {
     
-    ml_double feature_val = (*inst_ptr)[tree.index_of_feature_to_predict].continuous_value;
+    ml_double feature_val = (*inst_ptr)[tree.index_of_feature_to_predict()].continuous_value;
     
-    if((split.split_left_op == DT_COMPARISON_OP_NOOP) || 
-       instanceSatisfiesLeftConstraintOfSplit(*inst_ptr, split.split_feature_index, 
+    if((split.split_left_op == dt_comparison_op::noop) || 
+       instance_satisfies_constraint_of_split(*inst_ptr, split.split_feature_index, 
 					      split.split_feature_type, split.split_feature_value,
 					      split.split_left_op)) {
       ++n_left;
@@ -294,19 +337,21 @@ static std::tuple<ml_double, ml_double, ml_double> scoreRegionsWithSplitForRegre
 // score regions for classification using Gini index
 // returns a tuple with (left region score, right region score, combined score)
 //
-static std::tuple<ml_double, ml_double, ml_double> scoreRegionsWithSplitForClassification(const ml_data &mld, const dt_split &split, const dt_tree &tree) {
+static std::tuple<ml_double, ml_double, ml_double> score_regions_with_split_for_classification(const ml_data &mld, 
+											       const dt_split &split, 
+											       const decision_tree &tree) {
 
   ml_double lscore = 0, rscore = 0, combined_score = 0;
   ml_map<ml_uint, ml_uint> left_value_map;
   ml_map<ml_uint, ml_uint> right_value_map;
   ml_uint lcount=0, rcount=0;
-
-  for(auto const &inst_ptr : mld) {
+  
+  for(const auto &inst_ptr : mld) {
     
-    ml_uint discrete_value_index = (*inst_ptr)[tree.index_of_feature_to_predict].discrete_value_index;
+    ml_uint discrete_value_index = (*inst_ptr)[tree.index_of_feature_to_predict()].discrete_value_index;
     
-    if((split.split_left_op == DT_COMPARISON_OP_NOOP) || 
-       instanceSatisfiesLeftConstraintOfSplit(*inst_ptr, split.split_feature_index, 
+    if((split.split_left_op == dt_comparison_op::noop) || 
+       instance_satisfies_constraint_of_split(*inst_ptr, split.split_feature_index, 
 					      split.split_feature_type, split.split_feature_value,
 					      split.split_left_op)) {
       left_value_map[discrete_value_index] += 1;
@@ -338,17 +383,19 @@ static std::tuple<ml_double, ml_double, ml_double> scoreRegionsWithSplitForClass
 // score the regions created by subdividing mld using split.
 // returns a tuple with (left region score, right region score, combined score)
 //
-static std::tuple<ml_double, ml_double, ml_double> scoreRegionsWithSplit(const ml_data &mld, const dt_split &split, const dt_tree &tree) {
+static std::tuple<ml_double, ml_double, ml_double> score_regions_with_split(const ml_data &mld, 
+									    const dt_split &split, 
+									    const decision_tree &tree) {
 
   if(mld.empty()) {
     return(std::make_tuple(0.0, 0.0, 0.0));
   }
   
-  if(tree.type == DT_TREE_TYPE_REGRESSION) {
-    return(scoreRegionsWithSplitForRegression(mld, split, tree));
+  if(tree.type() == ml_model_type::regression) {
+    return(score_regions_with_split_for_regression(mld, split, tree));
   }
   else {
-    return(scoreRegionsWithSplitForClassification(mld, split, tree));
+    return(score_regions_with_split_for_classification(mld, split, tree));
   }
 
 }
@@ -357,26 +404,29 @@ static std::tuple<ml_double, ml_double, ml_double> scoreRegionsWithSplit(const m
 //
 // score undivided mld using empty noop split
 //
-static ml_double scoreRegion(const ml_data &mld, const dt_tree &tree) {
+static ml_double score_region(const ml_data &mld, const decision_tree &tree) {
   ml_double lscore=0, rscore=0, combined_score=0;
-  std::tie(lscore, rscore, combined_score) = scoreRegionsWithSplit(mld, dt_split{}, tree);
+  std::tie(lscore, rscore, combined_score) = score_regions_with_split(mld, dt_split{}, tree);
   return(combined_score);
 }
 
-static void pickRandomFeaturesToConsider(const ml_instance_definition &mlid, const dt_build_config &dtbc, ml_map<ml_uint, bool> &random_features) {
 
-  if(!dtbc.rng_config || (dtbc.features_to_consider_per_node > (mlid.size() - 1))) {
+static void pick_random_features_to_consider(const decision_tree &tree,
+					     ml_rng &rng,
+					     ml_map<ml_uint, bool> &random_features) {
+
+  if(tree.features_to_consider_per_node() > (tree.mlid().size() - 1)) {
     log_warn("invalid random features config... considering all features.\n");
     return;
   }
 
   //log("considering random features of the set: ");
 
-  while(random_features.size() < dtbc.features_to_consider_per_node) {
+  while(random_features.size() < tree.features_to_consider_per_node()) {
     
-    ml_uint feature_index = generateRandomNumber(dtbc.rng_config) % mlid.size();
+    ml_uint feature_index = rng.random_number() % tree.mlid().size();
 
-    if(feature_index == dtbc.index_of_feature_to_predict) {
+    if(feature_index == tree.index_of_feature_to_predict()) {
       continue;
     }
 
@@ -392,18 +442,19 @@ static void pickRandomFeaturesToConsider(const ml_instance_definition &mlid, con
   //log("\n");
 }
 
-static bool findBestSplit(const ml_instance_definition &mlid, const ml_data &mld, const dt_build_config &dtbc, dt_tree &tree, dt_split &best_split, ml_double score) {
+
+bool decision_tree::find_best_split(const ml_data &mld, dt_split &best_split, ml_double score) {
 
   ml_vector<dt_split> splits;
   
   ml_map<ml_uint, bool> random_features_to_consider;
-  if(dtbc.features_to_consider_per_node > 0) {
-    pickRandomFeaturesToConsider(mlid, dtbc, random_features_to_consider);
+  if(features_to_consider_per_node_ > 0) {
+    pick_random_features_to_consider(*this, rng_, random_features_to_consider);
   }
 
-  for(std::size_t findex = 0; findex < mlid.size(); ++findex) {
+  for(std::size_t findex = 0; findex < mlid_.size(); ++findex) {
 
-    if(findex == tree.index_of_feature_to_predict) {
+    if(findex == index_of_feature_to_predict_) {
       continue;
     }
 
@@ -411,9 +462,9 @@ static bool findBestSplit(const ml_instance_definition &mlid, const ml_data &mld
       continue;
     }
 
-    switch(mlid[findex].type) {
-    case ML_FEATURE_TYPE_DISCRETE: addSplitsForDiscreteFeature(findex, mld, splits); break;
-    case ML_FEATURE_TYPE_CONTINUOUS: addSplitsForContinuousFeature(findex, mld, splits); break;
+    switch(mlid_[findex]->type) {
+    case ml_feature_type::discrete: add_splits_for_discrete_feature(findex, mld, splits); break;
+    case ml_feature_type::continuous: add_splits_for_continuous_feature(findex, mld, splits); break;
     default: log_error("invalid feature type...\n"); break;
     }
   }
@@ -428,7 +479,7 @@ static bool findBestSplit(const ml_instance_definition &mlid, const ml_data &mld
   for(std::size_t ii = 0; ii < splits.size(); ++ii) {
     
     ml_double lscore=0, rscore=0, combined_score=0;
-    std::tie(lscore, rscore, combined_score) = scoreRegionsWithSplit(mld, splits[ii], tree);
+    std::tie(lscore, rscore, combined_score) = score_regions_with_split(mld, splits[ii], *this);
 
     if(combined_score < best_score) {
       best_score = combined_score;
@@ -444,37 +495,38 @@ static bool findBestSplit(const ml_instance_definition &mlid, const ml_data &mld
     best_split.left_score = best_left_score;
     best_split.right_score = best_right_score;
 
-    tree.feature_importance[best_split.split_feature_index].sum_score_delta += (score - best_score);
-    tree.feature_importance[best_split.split_feature_index].count += 1;
+    feature_importance_[best_split.split_feature_index].sum_score_delta += (score - best_score);
+    feature_importance_[best_split.split_feature_index].count += 1;
 
     return(true);
   }
 
   best_split.split_feature_index = 0;
-  best_split.split_left_op = best_split.split_right_op = DT_COMPARISON_OP_NOOP;
+  best_split.split_left_op = best_split.split_right_op = dt_comparison_op::noop;
   return(false);
 }
 
-static void configLeafNode(const ml_instance_definition &mlid, const ml_data &mld, const dt_build_config &dtbc, dt_tree &tree, dt_node_ptr &leaf) {
-  tree.leaves += 1;
-  leaf->node_type = DT_NODE_TYPE_LEAF;
-  leaf->feature_index = tree.index_of_feature_to_predict;
-  leaf->feature_type = mlid[tree.index_of_feature_to_predict].type;
-  if(tree.type == DT_TREE_TYPE_REGRESSION) {
-    leaf->feature_value.continuous_value = calcMeanForContinuousFeature(leaf->feature_index, mld);
+
+void decision_tree::config_leaf_node(const ml_data &mld, dt_node_ptr &leaf) {
+  leaves_ += 1;
+  leaf->node_type = dt_node_type::leaf;
+  leaf->feature_index = index_of_feature_to_predict_;
+  leaf->feature_type = mlid_[index_of_feature_to_predict_]->type;
+  if(type_ == ml_model_type::regression) {
+    leaf->feature_value.continuous_value = calc_mean_for_continuous_feature(leaf->feature_index, mld);
   }
   else {
-    leaf->feature_value.discrete_value_index = calcModeValueIndexForDiscreteFeature(leaf->feature_index, mld);
+    leaf->feature_value.discrete_value_index = calc_mode_value_index_for_discrete_feature(leaf->feature_index, mld);
   }
 
-  if(dtbc.keep_instances_at_leaf_nodes) {
+  if(keep_instances_at_leaf_nodes_) {
     leaf->leaf_instances = mld;
   }
-
 }
 
-static void configSplitNode(const dt_split &split, dt_node_ptr &split_node) {
-  split_node->node_type = DT_NODE_TYPE_SPLIT;
+
+static void config_split_node(const dt_split &split, dt_node_ptr &split_node) {
+  split_node->node_type = dt_node_type::split;
   split_node->feature_index = split.split_feature_index;
   split_node->feature_type = split.split_feature_type;
   split_node->feature_value = split.split_feature_value;
@@ -482,19 +534,20 @@ static void configSplitNode(const dt_split &split, dt_node_ptr &split_node) {
   split_node->split_right_op = split.split_right_op;
 }
 
-static bool pruneTwinLeafNodes(dt_node_ptr &node, dt_tree &tree) {
+
+bool decision_tree::prune_twin_leaf_nodes(dt_node_ptr &node) {
 
   // 
   // we prune sibling leaf nodes that predict the same class/value and
   // convert their parent from split to leaf node.
   //
  
-  if((node->split_left_node->node_type == DT_NODE_TYPE_LEAF) && (node->split_right_node->node_type == DT_NODE_TYPE_LEAF)) {
+  if((node->split_left_node->node_type == dt_node_type::leaf) && (node->split_right_node->node_type == dt_node_type::leaf)) {
 
-    if(((tree.type == DT_TREE_TYPE_CLASSIFICATION) && (node->split_left_node->feature_value.discrete_value_index == node->split_right_node->feature_value.discrete_value_index)) ||
-       ((tree.type == DT_TREE_TYPE_REGRESSION) && (fabs(node->split_left_node->feature_value.continuous_value - node->split_right_node->feature_value.continuous_value) < DT_COMPARISON_EQUAL_TOL))) {
-      tree.nodes -= 2;
-      tree.leaves -= 2;
+    if(((type_ == ml_model_type::classification) && (node->split_left_node->feature_value.discrete_value_index == node->split_right_node->feature_value.discrete_value_index)) ||
+       ((type_ == ml_model_type::regression) && (fabs(node->split_left_node->feature_value.continuous_value - node->split_right_node->feature_value.continuous_value) < DT_COMPARISON_EQUAL_TOL))) {
+      nodes_ -= 2;
+      leaves_ -= 2;
       node->split_left_node = nullptr;
       node->split_right_node = nullptr;
       return(true);
@@ -504,9 +557,8 @@ static bool pruneTwinLeafNodes(dt_node_ptr &node, dt_tree &tree) {
   return(false);
 }
 
-static void buildTreeNode(const ml_instance_definition &mlid, const ml_data &mld, const dt_build_config &dtbc, 
-			  dt_tree &tree, dt_node_ptr &node, ml_uint depth, ml_double score) {
 
+void decision_tree::build_tree_node(const ml_data &mld, dt_node_ptr &node, ml_uint depth, ml_double score) {
   
   node = std::make_shared<dt_node>();
   if(!node) {
@@ -514,178 +566,185 @@ static void buildTreeNode(const ml_instance_definition &mlid, const ml_data &mld
     abort();
   }
 
-  tree.nodes += 1;
+  nodes_ += 1;
 
-  if(depth == dtbc.max_tree_depth) {
-    configLeafNode(mlid, mld, dtbc, tree, node);
+  if(depth == max_tree_depth_) {
+    config_leaf_node(mld, node);
     return;
   }
   
   dt_split best_split = {};
   ml_data leftmld, rightmld;
 
-  if(findBestSplit(mlid, mld, dtbc, tree, best_split, score)) {
-    performSplit(mld, best_split, leftmld, rightmld);
+  if(find_best_split(mld, best_split, score)) {
+    perform_split(mld, best_split, leftmld, rightmld);
   }
 
-  if((leftmld.size() < dtbc.min_leaf_instances) || 
-     (rightmld.size() < dtbc.min_leaf_instances)) {
-    configLeafNode(mlid, mld, dtbc, tree, node);
+  if((leftmld.size() < min_leaf_instances_) || 
+     (rightmld.size() < min_leaf_instances_)) {
+    config_leaf_node(mld, node);
     return;
   }
 
-  configSplitNode(best_split, node);
+  config_split_node(best_split, node);
 
-  buildTreeNode(mlid, leftmld, dtbc, tree, node->split_left_node, depth+1, best_split.left_score);
-  buildTreeNode(mlid, rightmld, dtbc, tree, node->split_right_node, depth+1, best_split.right_score);
+  build_tree_node(leftmld, node->split_left_node, depth+1, best_split.left_score);
+  build_tree_node(rightmld, node->split_right_node, depth+1, best_split.right_score);
 
-  if(pruneTwinLeafNodes(node, tree)) {
-    configLeafNode(mlid, mld, dtbc, tree, node);
+  if(prune_twin_leaf_nodes(node)) {
+    config_leaf_node(mld, node);
   }
  
 }
 
-bool buildDecisionTree(const ml_instance_definition &mlid, const ml_data &mld, const dt_build_config &dtbc, dt_tree &tree) {
 
-  if(!validateInput(mlid, mld, dtbc)) {
+bool decision_tree::train(const ml_data &mld) {
+
+  if(!validate_for_training(mld)) {
     return(false);
   }
 
-  tree.root = nullptr;
-  tree.nodes = tree.leaves = 0;
-  tree.feature_importance.clear();
-  tree.feature_importance.resize(mlid.size());
-  tree.index_of_feature_to_predict = dtbc.index_of_feature_to_predict;
-  tree.type = (mlid[dtbc.index_of_feature_to_predict].type == ML_FEATURE_TYPE_DISCRETE) ? DT_TREE_TYPE_CLASSIFICATION : DT_TREE_TYPE_REGRESSION;
+  root_ = nullptr;
+  nodes_ = leaves_ = 0;
+  feature_importance_.clear();
+  feature_importance_.resize(mlid_.size());
 
   auto t1 = std::chrono::high_resolution_clock::now();
-  buildTreeNode(mlid, mld, dtbc, tree, tree.root, 0, scoreRegion(mld, tree)); 
+  build_tree_node(mld, root_, 0, score_region(mld, *this)); 
   auto t2 = std::chrono::high_resolution_clock::now();
    
   ml_uint ms = std::chrono::duration_cast<std::chrono::milliseconds>(t2-t1).count();
-  log("built tree %s in %.3f seconds (%u leaves, %u nodes)\n", tree.name.c_str(), (ms / 1000.0), tree.leaves, tree.nodes); 
+  log("built tree %s in %.3f seconds (%u leaves, %u nodes)\n", name_.c_str(), (ms / 1000.0), leaves_, nodes_); 
 
   return(true);
 }
 
-static ml_string nameForSplitOperator(dt_comparison_operator op) {
+
+static ml_string name_for_split_operator(dt_comparison_op op) {
   
   ml_string op_name;
 
   switch(op) {
-  case DT_COMPARISON_OP_NOOP : op_name = "no-op"; break;
-  case DT_COMPARISON_OP_LESSTHANOREQUAL: op_name = "<="; break;
-  case DT_COMPARISON_OP_GREATERTHAN: op_name = ">"; break;
-  case DT_COMPARISON_OP_EQUAL: op_name = "="; break;
-  case DT_COMPARISON_OP_NOTEQUAL: op_name = "!="; break;
+  case dt_comparison_op::noop : op_name = "no-op"; break;
+  case dt_comparison_op::lessthanorequal: op_name = "<="; break;
+  case dt_comparison_op::greaterthan: op_name = ">"; break;
+  case dt_comparison_op::equal: op_name = "="; break;
+  case dt_comparison_op::notequal: op_name = "!="; break;
   default: log_error("invalid split operator"); break;
   }
 
   return(op_name);
 }
 
-static void printDecisionTreeNode(const ml_instance_definition &mlid, const dt_node &node, ml_uint depth) {
+
+static void decision_tree_node_desc(const ml_instance_definition &mlid, const dt_node &node, ml_uint depth, ml_string &desc) {
 
   ml_string feature_value_as_string;
-  if(node.feature_type == ML_FEATURE_TYPE_DISCRETE) {
-    feature_value_as_string = mlid[node.feature_index].discrete_values[node.feature_value.discrete_value_index];
+  if(node.feature_type == ml_feature_type::discrete) {
+    feature_value_as_string = mlid[node.feature_index]->discrete_values[node.feature_value.discrete_value_index];
   }
   else {
-    std::ostringstream ss;
-    ss << node.feature_value.continuous_value;
-    feature_value_as_string = ss.str(); 
+    feature_value_as_string = std::to_string(node.feature_value.continuous_value);
   }
 
-  if(node.node_type == DT_NODE_TYPE_SPLIT) {
-    
+  if(node.node_type == dt_node_type::split) { 
     // Left Side
-    log("\n");
+    desc += "\n";
     for(ml_uint ii=0; ii < depth; ++ii) {
-      log("|  ");
+      desc += "|  ";
     }
 
-    log("%s %s %s", mlid[node.feature_index].name.c_str(), nameForSplitOperator(node.split_left_op).c_str(), feature_value_as_string.c_str());
-    printDecisionTreeNode(mlid, *node.split_left_node, depth+1);
+    desc += mlid[node.feature_index]->name + " ";
+    desc += name_for_split_operator(node.split_left_op) + " ";
+    desc += feature_value_as_string;
+    decision_tree_node_desc(mlid, *node.split_left_node, depth+1, desc);
   
     // Right Side
-    log("\n");
+    desc += "\n";
     for(ml_uint ii=0; ii < depth; ++ii) {
-      log("|  ");
+      desc += "|  ";
     }
 
-    log("%s %s %s", mlid[node.feature_index].name.c_str(), nameForSplitOperator(node.split_right_op).c_str(), feature_value_as_string.c_str());
-    printDecisionTreeNode(mlid, *node.split_right_node, depth+1);
+    desc += mlid[node.feature_index]->name + " ";
+    desc += name_for_split_operator(node.split_right_op) + " ";
+    desc += feature_value_as_string;
+    decision_tree_node_desc(mlid, *node.split_right_node, depth+1, desc);
   }
   else {
-    // DT_NODE_TYPE_LEAF
-    log(": %s", feature_value_as_string.c_str());
+    // dt_node_type::leaf
+    desc += ": " + feature_value_as_string;
   }
   
 }
-
-void printDecisionTreeSummary(const ml_instance_definition &mlid, const dt_tree &tree) {
   
-  log("\n\n*** Decision Tree Summary ***\n\n");
-  log("Feature To Predict: %s\n", mlid[tree.index_of_feature_to_predict].name.c_str());
-  log("Type: %s, Leaves: %d, Size: %d\n", (tree.type == DT_TREE_TYPE_REGRESSION) ? "regression" : "classification", tree.leaves, tree.nodes);
-  printDecisionTreeNode(mlid, *tree.root, 0);
-  log("\n\n");
+
+ml_string decision_tree::summary() const {
+
+  if(mlid_.empty() || !root_) {
+    return("(empty decision tree)\n");
+  }
+
+  ml_string desc;
+  desc += "\n\n*** Decision Tree Summary ***\n\n";
+  desc += "Feature To Predict: " + mlid_[index_of_feature_to_predict_]->name + "\n";
+  ml_string type_str = (type_ == ml_model_type::regression) ? "regression" : "classification";
+  desc += "Type: " + type_str;
+  desc += ", Max Depth: " + std::to_string(max_tree_depth_);
+  desc += ", Min Leaf Instances: " + std::to_string(min_leaf_instances_);
+  if(features_to_consider_per_node_ > 0) {
+    desc += ", Features p/n: " + std::to_string(features_to_consider_per_node_);
+    desc += ", Seed: " + std::to_string(seed_);
+  }
+  
+  desc += ", Leaves: " + std::to_string(leaves_);
+  desc += ", Size: " + std::to_string(nodes_) + "\n";
+  decision_tree_node_desc(mlid_, *root_, 0, desc);
+  desc += "\n\n";
+
+  return(desc);
 }
 
 
-static const ml_feature_value *evaluateDecisionTreeNodeForInstance(const dt_node &node, const ml_instance &instance) {
+static const ml_feature_value evaluate_decision_tree_node_for_instance(const dt_node &node, const ml_instance &instance) {
 
-  if(node.node_type == DT_NODE_TYPE_LEAF) {
-    return(&node.feature_value);
+  if(node.node_type == dt_node_type::leaf) {
+    return(node.feature_value);
   }
 
-  if(instanceSatisfiesLeftConstraintOfSplit(instance, node.feature_index, node.feature_type, node.feature_value, node.split_left_op)) {
-    return(evaluateDecisionTreeNodeForInstance(*node.split_left_node, instance));
+  if(instance_satisfies_constraint_of_split(instance, node.feature_index, node.feature_type, node.feature_value, node.split_left_op)) {
+    return(evaluate_decision_tree_node_for_instance(*node.split_left_node, instance));
   }
 
-  return(evaluateDecisionTreeNodeForInstance(*node.split_right_node, instance));
+  return(evaluate_decision_tree_node_for_instance(*node.split_right_node, instance));
 }
 
-const ml_feature_value *evaluateDecisionTreeForInstance(const ml_instance_definition &mlid, const dt_tree &tree, const ml_instance &instance) {
-  
-  if(instance.size() < mlid.size()) {
+
+ml_feature_value decision_tree::evaluate(const ml_instance &instance) const {
+
+  ml_feature_value empty = {};
+  if(!root_ || mlid_.empty()) {
+    log_warn("evaluate called on an empty tree...\n");
+    return(empty);
+  }
+
+  if(instance.size() < mlid_.size()) {
     log_error("feature count mismatch b/t instance definition and instance to evaluate\n");
-    return(nullptr);
+    return(empty);
   }
 
-  return(evaluateDecisionTreeNodeForInstance(*tree.root, instance));
+  return(evaluate_decision_tree_node_for_instance(*root_, instance));
 }
 
-void printDecisionTreeResultsForData(const ml_instance_definition &mlid, const ml_data &mld, const dt_tree &tree) {
-
-  ml_regression_results mlrr = {};
-  ml_classification_results mlcr = {};
-  for(const auto &inst_ptr : mld) {
-    const ml_feature_value *result = evaluateDecisionTreeForInstance(mlid, tree, *inst_ptr);
-    switch(tree.type) {
-    case DT_TREE_TYPE_CLASSIFICATION: collectClassificationResultForInstance(mlid, tree.index_of_feature_to_predict, *inst_ptr, result, mlcr); break;
-    case DT_TREE_TYPE_REGRESSION: collectRegressionResultForInstance(mlid, tree.index_of_feature_to_predict, *inst_ptr, result, mlrr); break;
-    default: break;
-    }
-  }
   
-  switch(tree.type) {
-  case DT_TREE_TYPE_CLASSIFICATION: printClassificationResultsSummary(mlid, tree.index_of_feature_to_predict, mlcr); break;
-  case DT_TREE_TYPE_REGRESSION: printRegressionResultsSummary(mlrr); break;
-  default: break;
-  }
-
-}
-
-static cJSON *addNodesToJSONObject(const dt_node &node, cJSON *json_nodes, ml_uint &node_id) {
+static cJSON *add_nodes_to_json_object(const dt_node &node, cJSON *json_nodes, ml_uint &node_id) {
 
   cJSON *json_node = cJSON_CreateObject();
   cJSON_AddNumberToObject(json_node, "id", node_id);
-  cJSON_AddNumberToObject(json_node, "nt", node.node_type);
+  cJSON_AddNumberToObject(json_node, "nt", (double) node.node_type);
   cJSON_AddNumberToObject(json_node, "fi", node.feature_index);
-  cJSON_AddNumberToObject(json_node, "ft", node.feature_type);
+  cJSON_AddNumberToObject(json_node, "ft", (double) node.feature_type);
   cJSON_AddNumberToObject(json_node, "fv", 
-			  (node.feature_type == ML_FEATURE_TYPE_CONTINUOUS) ? node.feature_value.continuous_value : node.feature_value.discrete_value_index);
+			  (node.feature_type == ml_feature_type::continuous) ? node.feature_value.continuous_value : node.feature_value.discrete_value_index);
 
   //
   // we don't use cJSON_AddItemToArray(json_nodes, json_node) here for performance reasons
@@ -703,35 +762,20 @@ static cJSON *addNodesToJSONObject(const dt_node &node, cJSON *json_nodes, ml_ui
   if(node.split_left_node) {
     ml_uint left_node_id = ++node_id;
     cJSON_AddNumberToObject(json_node, "lid", left_node_id);
-    cJSON_AddNumberToObject(json_node, "lop", node.split_left_op);
-    json_nodes = addNodesToJSONObject(*node.split_left_node, json_nodes, node_id); 
+    cJSON_AddNumberToObject(json_node, "lop", (double)node.split_left_op);
+    json_nodes = add_nodes_to_json_object(*node.split_left_node, json_nodes, node_id); 
   }
 
   if(node.split_right_node) {
     ml_uint right_node_id = ++node_id;
     cJSON_AddNumberToObject(json_node, "rid", right_node_id);
-    cJSON_AddNumberToObject(json_node, "rop", node.split_right_op);
-    json_nodes = addNodesToJSONObject(*node.split_right_node, json_nodes, node_id);
+    cJSON_AddNumberToObject(json_node, "rop", (double)node.split_right_op);
+    json_nodes = add_nodes_to_json_object(*node.split_right_node, json_nodes, node_id);
   }
 
   return(json_nodes);
 }
 
-static cJSON *createJSONObjectFromDecisionTree(const dt_tree &tree) {
-  
-  cJSON *json_tree = cJSON_CreateObject();
-  cJSON_AddStringToObject(json_tree, "object", "dt_tree");
-  cJSON_AddNumberToObject(json_tree, "type", tree.type);
-  cJSON_AddNumberToObject(json_tree, "index_of_feature_to_predict", tree.index_of_feature_to_predict);
-
-  cJSON *json_nodes = cJSON_CreateArray();
-  cJSON_AddItemToObject(json_tree, "nodes", json_nodes);
-
-  ml_uint node_id = 0;
-  addNodesToJSONObject(*tree.root, json_nodes, node_id);
-
-  return(json_tree);
-}
 
 static bool validateTreeNodeJSONObject(cJSON *json_node) {
   if(!cJSON_GetObjectItem(json_node, "nt") ||
@@ -742,7 +786,7 @@ static bool validateTreeNodeJSONObject(cJSON *json_node) {
   }
   
   dt_node_type node_type = (dt_node_type) cJSON_GetObjectItem(json_node, "nt")->valueint;
-  if(node_type == DT_NODE_TYPE_SPLIT) {
+  if(node_type == dt_node_type::split) {
     if(!cJSON_GetObjectItem(json_node, "lop") ||
        !cJSON_GetObjectItem(json_node, "lid") ||
        !cJSON_GetObjectItem(json_node, "rop") ||
@@ -754,7 +798,8 @@ static bool validateTreeNodeJSONObject(cJSON *json_node) {
   return(true);
 }
 
-static bool createTreeNodeFromJSONObject(dt_tree &tree, dt_node_ptr &node, ml_uint node_id, ml_map<ml_uint, cJSON *> &nodes_map) {
+
+static bool create_tree_node_from_json(dt_node_ptr &node, ml_uint node_id, ml_map<ml_uint, cJSON *> &nodes_map, ml_uint &nodes, ml_uint &leaves) {
 
   cJSON *json_node = (nodes_map.find(node_id) != nodes_map.end()) ? nodes_map[node_id] : nullptr;
   if(!json_node) {
@@ -773,30 +818,30 @@ static bool createTreeNodeFromJSONObject(dt_tree &tree, dt_node_ptr &node, ml_ui
     return(false);
   }
 
-  tree.nodes += 1;
+  nodes += 1;
 
   node->node_type = (dt_node_type) cJSON_GetObjectItem(json_node, "nt")->valueint;
   node->feature_index = cJSON_GetObjectItem(json_node, "fi")->valueint;
   node->feature_type = (ml_feature_type) cJSON_GetObjectItem(json_node, "ft")->valueint;
-  if(node->feature_type == ML_FEATURE_TYPE_CONTINUOUS) {
+  if(node->feature_type == ml_feature_type::continuous) {
     node->feature_value.continuous_value = cJSON_GetObjectItem(json_node, "fv")->valuedouble;
   }
   else {
     node->feature_value.discrete_value_index = cJSON_GetObjectItem(json_node, "fv")->valueint;
   }
 
-  if(node->node_type == DT_NODE_TYPE_LEAF) {
-    tree.leaves += 1;
+  if(node->node_type == dt_node_type::leaf) {
+    leaves += 1;
   }
   else {
-    node->split_left_op = (dt_comparison_operator) cJSON_GetObjectItem(json_node, "lop")->valueint;
+    node->split_left_op = (dt_comparison_op) cJSON_GetObjectItem(json_node, "lop")->valueint;
     ml_uint left_node_id = cJSON_GetObjectItem(json_node, "lid")->valueint;
 
-    node->split_right_op = (dt_comparison_operator) cJSON_GetObjectItem(json_node, "rop")->valueint;
+    node->split_right_op = (dt_comparison_op) cJSON_GetObjectItem(json_node, "rop")->valueint;
     ml_uint right_node_id = cJSON_GetObjectItem(json_node, "rid")->valueint;
 
-    if(!createTreeNodeFromJSONObject(tree, node->split_left_node, left_node_id, nodes_map) ||
-       !createTreeNodeFromJSONObject(tree, node->split_right_node, right_node_id, nodes_map)) {
+    if(!create_tree_node_from_json(node->split_left_node, left_node_id, nodes_map, nodes, leaves) ||
+       !create_tree_node_from_json(node->split_right_node, right_node_id, nodes_map, nodes, leaves)) {
       return(false);
     }
   }
@@ -805,34 +850,28 @@ static bool createTreeNodeFromJSONObject(dt_tree &tree, dt_node_ptr &node, ml_ui
   return(true);
 }
 
-static bool createDecisionTreeFromJSONObject(cJSON *json_object, dt_tree &tree) {
+
+bool decision_tree::create_decision_tree_from_json(cJSON *json_object) {
 
   if(!json_object) {
-    log_error("nil json object...\n");
     return(false);
   }
 
   cJSON *object = cJSON_GetObjectItem(json_object, "object");
-  if(!object || !object->valuestring || strcmp(object->valuestring, "dt_tree")) {
-    log_error("json object is not a decision tree...\n");
+  if(!object || !object->valuestring || strcmp(object->valuestring, "decision_tree")) {
+    log_error("tree json is malformed...\n");
     return(false);
   }
 
-  cJSON *type = cJSON_GetObjectItem(json_object, "type");
-  if(!type || (type->type != cJSON_Number)) {
-    log_error("json object is missing tree type\n");
+  if(!(get_modeltype_value_from_json(json_object, "type", type_) &&
+       get_numeric_value_from_json(json_object, "index_of_feature_to_predict", index_of_feature_to_predict_) &&
+       get_numeric_value_from_json(json_object, "max_tree_depth", max_tree_depth_) &&
+       get_numeric_value_from_json(json_object, "min_leaf_instances", min_leaf_instances_) &&
+       get_numeric_value_from_json(json_object, "features_to_consider_per_node", features_to_consider_per_node_) &&
+       get_numeric_value_from_json(json_object, "seed", seed_) &&
+       get_bool_value_from_json(json_object, "keep_instances_at_leaf_nodes", keep_instances_at_leaf_nodes_))) {
     return(false);
   }
-
-  tree.type = (dt_tree_type) type->valueint;
-
-  cJSON *index = cJSON_GetObjectItem(json_object, "index_of_feature_to_predict");
-  if(!index || (index->type != cJSON_Number)) {
-    log_error("json object is missing the index of the feature to predict\n");
-    return(false);
-  }
-
-  tree.index_of_feature_to_predict = index->valueint;
 
   cJSON *nodes_array = cJSON_GetObjectItem(json_object, "nodes");
   if(!nodes_array || (nodes_array->type != cJSON_Array)) {
@@ -844,13 +883,13 @@ static bool createDecisionTreeFromJSONObject(cJSON *json_object, dt_tree &tree) 
   cJSON *node = nodes_array->child;;
   while(node) {
     if(!node || (node->type != cJSON_Object)) {
-      log_error("json object has bogus node in nodes array\n");
+      log_error("tree json has bogus node in nodes array\n");
       return(false);
     }
     
     cJSON *node_id = cJSON_GetObjectItem(node, "id");
     if(!node_id || (node_id->type != cJSON_Number)) {
-      log_error("json object has node with bogus node_id");
+      log_error("tree json has node with bogus node_id");
       return(false);
     }
 
@@ -859,11 +898,11 @@ static bool createDecisionTreeFromJSONObject(cJSON *json_object, dt_tree &tree) 
   }
 
   if(nodes_map.empty()) {
-    log_error("json object has empty nodes array\n");
+    log_error("tree json has empty nodes array\n");
     return(false);
   }
 
-  if(!createTreeNodeFromJSONObject(tree, tree.root, 0, nodes_map)) {
+  if(!create_tree_node_from_json(root_, 0, nodes_map, nodes_, leaves_)) {
     log_error("failed to build tree nodes from json...\n");
     return(false);
   }
@@ -871,32 +910,86 @@ static bool createDecisionTreeFromJSONObject(cJSON *json_object, dt_tree &tree) 
   return(true);
 }
 
-bool writeDecisionTreeToFile(const ml_string &path_to_file, const dt_tree &tree) {
-  cJSON *json_object = createJSONObjectFromDecisionTree(tree);
-  if(!json_object) {
-    log_error("couldn't create json object from tree\n");
+
+bool decision_tree::save(const ml_string &path, bool part_of_ensemble) const {
+
+  if(mlid_.empty() || !root_) {
     return(false);
   }
 
-  bool status = writeModelJSONToFile(path_to_file, json_object);
-  cJSON_Delete(json_object);
+  cJSON *json_tree = cJSON_CreateObject();
+  if(!json_tree) {
+    log_error("couldn't create json object for tree\n");
+    return(false);
+  }
+
+  cJSON_AddStringToObject(json_tree, "object", "decision_tree");
+  cJSON_AddNumberToObject(json_tree, "type", (double)type_);
+  cJSON_AddNumberToObject(json_tree, "index_of_feature_to_predict", index_of_feature_to_predict_);
+  cJSON_AddNumberToObject(json_tree, "max_tree_depth", max_tree_depth_);
+  cJSON_AddNumberToObject(json_tree, "min_leaf_instances", min_leaf_instances_);
+  cJSON_AddNumberToObject(json_tree, "features_to_consider_per_node", features_to_consider_per_node_);
+  cJSON_AddNumberToObject(json_tree, "seed", seed_);
+  cJSON_AddNumberToObject(json_tree, "keep_instances_at_leaf_nodes", keep_instances_at_leaf_nodes_);
+
+  cJSON *json_nodes = cJSON_CreateArray();
+  cJSON_AddItemToObject(json_tree, "nodes", json_nodes);
+
+  ml_uint node_id = 0;
+  add_nodes_to_json_object(*root_, json_nodes, node_id);
+
+  bool status = false;
+  if(part_of_ensemble) {
+    //
+    // a tree within an ensemble (random_forest, boosted_trees) writes
+    // just its tree json without the mlid, which is written by the 
+    // ensemble model.
+    //
+    status = write_model_json_to_file(path, json_tree);
+  }
+  else {
+    //
+    // a single tree has its own directory with tree json and mlid json
+    //
+    if(prepare_directory_for_model_save(path) &&
+       write_model_json_to_file(path + "/" + DT_TREE_JSONFILE, json_tree) &&
+       write_instance_definition_to_file(path + "/" + DT_MLID_JSONFILE, mlid_)) {
+      status = true;
+    }
+  }
+
+  cJSON_Delete(json_tree);
 
   return(status);
 }
 
-bool readDecisionTreeFromFile(const ml_string &path_to_file, dt_tree &tree) {
-  cJSON *json_object = readModelJSONFromFile(path_to_file);
-  if(!json_object) {
-    log_error("couldn't load decision tree json object from model file: %s\n", path_to_file.c_str());
+
+bool decision_tree::restore(const ml_string &path) {
+  ml_instance_definition mlid;
+  if(!read_instance_definition_from_file(path + "/" + DT_MLID_JSONFILE, mlid)) {
     return(false);
   }
 
-  tree.root = nullptr;
-  tree.leaves = tree.nodes = 0;
-  bool status = createDecisionTreeFromJSONObject(json_object, tree);
+  return(restore(path + "/" + DT_TREE_JSONFILE, mlid));
+}
+
+
+bool decision_tree::restore(const ml_string &path, const ml_instance_definition &mlid) {
+  cJSON *json_object = read_model_json_from_file(path);
+  if(!json_object) {
+    log_error("couldn't load decision tree json object from model file: %s\n", path.c_str());
+    return(false);
+  }
+
+  mlid_ = mlid;
+  root_ = nullptr;
+  leaves_ = nodes_ = 0;
+  feature_importance_.clear();
+  bool status = create_decision_tree_from_json(json_object);
   cJSON_Delete(json_object);
 
-  return(status);
+  return(status);  
 }
+
 
 } // namespace puml

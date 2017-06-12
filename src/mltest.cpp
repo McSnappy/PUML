@@ -20,133 +20,130 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-#include <stdlib.h>
-#include <unistd.h>
+#include <iostream>
 
+#include "mlmodel.h"
+#include "decisiontree.h"
 #include "randomforest.h"
 #include "boosting.h"
 
 
-puml::ml_double ae_loss(puml::ml_double yi, puml::ml_double yhat) {
-  puml::ml_double diff = yi - yhat;
-  return(fabs(diff));
-}
-
-
-puml::ml_double ae_gradient(puml::ml_double yi, puml::ml_double yhat) {
-  puml::ml_double diff = yi - yhat;
-
-  if(diff < 0.0) {
-    diff = -1.0;
-  }
-  else if(diff > 0.0) {
-    diff = 1.0;
-  }
-
-  return(diff);
-}
-
+void decision_tree_example();
+void random_forest_example();
+void boosted_trees_example();
 
 int main(int argc, char **argv) {
 
-  //
-  // Decision Tree Example
-  //
-  puml::log("\n\n *** Single Decision Tree Example Using Iris Data From UCI ***\n");
+  decision_tree_example();
+  random_forest_example();
+  boosted_trees_example();
+ 
+  return 0;
+}
 
-  // Load the Iris dataset 
-  puml::ml_data iris_mld;
-  puml::ml_instance_definition iris_mlid;
-  puml::loadInstanceDataFromFile("./iris.csv", iris_mlid, iris_mld);
+
+void decision_tree_example() {
+
+  std::cout << "+++ decision tree demo using iris data +++" << std::endl;
+
+  // Load the Iris data
+  puml::ml_data mld;
+  puml::ml_instance_definition mlid;
+  puml::load_data("./iris.csv", mlid, mld);
 
   // Take 50% for training
-  puml::ml_data iris_training, iris_test;
-  puml::ml_rng_config *rng_config = puml::createRngConfigWithSeed(333);
-  puml::splitDataIntoTrainingAndTest(iris_mld, 0.5, rng_config, iris_training, iris_test);
+  puml::ml_data training, test;
+  puml::split_data_into_training_and_test(mld, 0.5, training, test, 999);
 
-  // Build the tree
-  puml::dt_tree iris_tree;
-  puml::dt_build_config dtbc = {};
-  dtbc.max_tree_depth = 6;
-  dtbc.min_leaf_instances = 2;
-  dtbc.index_of_feature_to_predict = indexOfFeatureWithName("Class", iris_mlid);
-  if(!puml::buildDecisionTree(iris_mlid, iris_training, dtbc, iris_tree)) {
-    puml::log_error("failed to build tree...\n");
-    exit(1);
+  // Build a single decision tree with 
+  // max depth of 6 and a minimum of 2 instances at 
+  // leaf nodes.
+  puml::decision_tree dt{mlid, "Class", 6, 2};
+  dt.train(training);
+  
+  // Show the tree structure
+  std::cout << dt.summary() << std::endl;
+
+  // Test the tree using the holdout
+  puml::ml_classification_results test_results{mlid, dt.index_of_feature_to_predict()};
+  for(const auto &inst_ptr : test) {
+    test_results.collect_result(dt.evaluate(*inst_ptr), *inst_ptr);
   }
   
-  // Show the tree
-  puml::printDecisionTreeSummary(iris_mlid, iris_tree);
-
-  // Show the results over the hold out data
-  puml::printDecisionTreeResultsForData(iris_mlid, iris_test, iris_tree);
+  std::cout << "*** Holdout Results ***" << std::endl << test_results.summary();
+}
 
 
-  //
-  // Random Forest Example 
-  //
-  puml::log("\n\n *** Random Forest Example Using CoverType Data From UCI ***\n");
-  puml::ml_data cover_mld;
-  puml::ml_instance_definition cover_mlid;
-  puml::loadInstanceDataFromFile("./covertype.csv", cover_mlid, cover_mld);
-  puml::printInstanceDataSummary(cover_mlid);
+void random_forest_example() {
 
-  // Train on 10% for this demonstration 
-  puml::ml_data cover_training, cover_test;
-  puml::splitDataIntoTrainingAndTest(cover_mld, 0.1, rng_config, cover_training, cover_test);
+  std::cout << "+++ random forest demo using cover type data +++" << std::endl;
+
+  // Load the cover type data
+  puml::ml_data mld;
+  puml::ml_instance_definition mlid;
+  puml::load_data("./covertype.csv", mlid, mld);
   
-  puml::rf_forest cover_forest;
-  puml::rf_build_config rfbc = {};
-  rfbc.index_of_feature_to_predict = puml::indexOfFeatureWithName("CoverType", cover_mlid);
-  rfbc.number_of_trees = 50;
-  rfbc.number_of_threads = 2;
-  rfbc.max_tree_depth = 30;
-  rfbc.seed = 999;
-  rfbc.max_continuous_feature_splits = 20; // experimental optimization
-  rfbc.features_to_consider_per_node = (puml::ml_uint)(sqrt(cover_mlid.size()-1) + 0.5);
-   
-  if(!puml::buildRandomForest(cover_mlid, cover_training, rfbc, cover_forest)) {
-    puml::log_error("failed to build random forest...\n");
-    exit(1);
-  }
+  // Take 10% for training (for simplicity)
+  puml::ml_data training,test;
+  puml::split_data_into_training_and_test(mld, 0.1, training, test);
 
-  // Show results of forest for the hold out
-  puml::printRandomForestResultsForData(cover_mlid, cover_test, cover_forest);
+  // 2 fold cross validation, 50 trees per forest (for simplicity)
+  puml::ml_model<puml::random_forest> rf{mlid, "CoverType", 50};
+  auto cv = rf.train<puml::ml_classification_results>(training, 2, 333);
+  std::cout <<  rf.model().feature_importance_summary() << std::endl;
+  std::cout << cv.summary() << std::endl;
+  std::cout << "testing using holdout..." << std::endl;
+  auto test_results = rf.evaluate<puml::ml_classification_results>(test);
+  std::cout << "*** Holdout Results ***" << std::endl << test_results.summary();
+}
 
-  // Save the model to disk
-  puml::writeRandomForestToDirectory("/tmp/rf-cover", cover_mlid, cover_forest);
 
- 
-  //
-  // Boosted Regression Trees example
-  //
-  puml::log("\n\n *** Boosted Trees Example Using Wine Quality Data From UCI ***\n");
-  puml::ml_data wine_mld;
-  puml::ml_instance_definition wine_mlid;
-  puml::loadInstanceDataFromFile("./winequality-white.csv", wine_mlid, wine_mld);
+void boosted_trees_example() {
 
-  // Take 80% for training
-  puml::ml_data wine_training, wine_test;
-  puml::splitDataIntoTrainingAndTest(wine_mld, 0.8, rng_config, wine_training, wine_test);
+  std::cout << "+++ boosted trees demo using wine quality data +++" << std::endl;
 
-  // Build the boosted trees
-  puml::boosted_trees bt;
-  puml::boosted_build_config bbc = {};
-  bbc.learning_rate = 0.1;
-  bbc.subsample = 0.9;
-  bbc.number_of_trees = 100;
-  bbc.max_tree_depth = 8;
-  bbc.seed = 42;
-  bbc.index_of_feature_to_predict = puml::indexOfFeatureWithName("quality", wine_mlid);
-  bbc.lossFunc = ae_loss;
-  bbc.gradientFunc = ae_gradient;
-  puml::buildBoostedTrees(wine_mlid, bbc, wine_training, bt);
+  // Load the Iris data
+  puml::ml_data mld;
+  puml::ml_instance_definition mlid;
+  puml::load_data("./winequality-white.csv", mlid, mld);
 
-  // Show the results using the holdout data
-  puml::printBoostedTreesResultsForData(wine_mlid, wine_test, bt);
+  // Take 50% for training
+  puml::ml_data training, test;
+  puml::split_data_into_training_and_test(mld, 0.5, training, test, 222);
 
-  // Store the model 
-  puml::writeBoostedTreesToDirectory("/tmp/boosted_test", wine_mlid, bt);
-  
-  return(0);
+  // 100 trees in the ensemble, 0.1 learning rate, random seed of 111,
+  // max depth of 8, subsample of 0.9
+  puml::ml_model<puml::boosted_trees> bt{mlid, "quality", 100, 0.1, 111, 8, 0.9};
+
+  // Custom Loss
+  bt.model().set_loss_func([](puml::ml_double yi, puml::ml_double yhat) { 
+      return(fabs(yi - yhat)); 
+    });
+
+  bt.model().set_gradient_func([](puml::ml_double yi, puml::ml_double yhat) { 
+      puml::ml_double diff = yi - yhat;
+      if(diff < 0.0) {
+	diff = -1.0;
+      }
+      else if(diff > 0.0) {
+	diff = 1.0;
+      }
+      
+      return(diff);
+    });
+
+  // Progress while training
+  bt.model().set_progress_callback([&bt, &test](puml::ml_uint iteration) -> bool {
+      if((iteration % 10) == 0) {
+	auto test_results = bt.evaluate<puml::ml_regression_results>(test);
+	std::cout << std::endl << "*** Holdout Results at iteration " << iteration << " ***" << std::endl;
+	std::cout << test_results.summary();
+      }
+
+      return(true);
+    });
+
+  // Train using 5 fold cross validation
+  auto cv = bt.train<puml::ml_regression_results>(training, 5, 333);
+  std::cout << cv.summary();
 }

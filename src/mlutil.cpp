@@ -21,31 +21,29 @@ SOFTWARE.
 */
 
 #include "mlutil.h"
-#include <sstream>
+#include "decisiontree.h"
+
 #include <ctime>
-#include <sys/stat.h>
 #include <dirent.h>
+#include <sstream>
+#include <sys/stat.h>
 
 namespace puml {
 
 const ml_string &TREE_MODEL_FILE_PREFIX = "tree";
   
-bool prepareDirectoryForModelSave(const ml_string &path_to_dir, 
-				  bool overwrite_existing) {
+bool prepare_directory_for_model_save(const ml_string &path_to_dir) {
   
   if((path_to_dir == ".") || (path_to_dir == "..")) {
     return(false);
   }
   
-  // move the directory if it already exists and we are allowed to overwrite.
+  //
+  // move the directory if it already exists 
+  //
   struct stat info;
   if((stat(path_to_dir.c_str(), &info) == 0) && (info.st_mode & S_IFDIR)) {
     
-    if(!overwrite_existing) {
-      log_error("directory exists and we aren't allowed to overwrite\n");
-      return(false);
-    }
-
     std::time_t timestamp = std::time(0);    
     std::ostringstream ss;
     ss << "mv " << path_to_dir << " " << path_to_dir << "." << timestamp;
@@ -55,7 +53,9 @@ bool prepareDirectoryForModelSave(const ml_string &path_to_dir,
     }
   }
 
+  //
   // create the model save directory 
+  //
   if(mkdir(path_to_dir.c_str(), 0755)) {
     log_error("couldn't create model save directory: %s\n", path_to_dir.c_str());
     perror("ERROR --> mkdir");
@@ -67,14 +67,16 @@ bool prepareDirectoryForModelSave(const ml_string &path_to_dir,
 }
   
   
-bool readDecisionTreesFromDirectory(const ml_string &path_to_dir,
-				    ml_vector<dt_tree> &trees) {   
+bool read_decision_trees_from_directory(const ml_string &path_to_dir,
+					const ml_instance_definition &mlid,
+					ml_vector<decision_tree> &trees) {   
   trees.clear();
   
   DIR *d = 0;
   struct dirent *dir = 0;
   d = opendir(path_to_dir.c_str());
   if(!d) {
+    log_error("can't scan model directory: %s", path_to_dir.c_str());
     return(false);
   }
   
@@ -86,17 +88,75 @@ bool readDecisionTreesFromDirectory(const ml_string &path_to_dir,
     }
     
     ml_string full_path = path_to_dir + "/" + dir->d_name;
-    dt_tree tree;
-    if(!readDecisionTreeFromFile(full_path, tree)) {
-      log_error("failed to parse tree from json: %s\n", full_path.c_str());
-      return(false);
-    }
-    
+    decision_tree tree(full_path, mlid);
     trees.push_back(tree);
   }
   
   closedir(d);
   
+  return(true);
+}
+
+
+static cJSON *get_number_item_from_json(cJSON *json_object, const ml_string &name) {
+  cJSON *item = cJSON_GetObjectItem(json_object, name.c_str());
+  if(!item || (item->type != cJSON_Number)) {
+    log_error("json is missing %s\n", name.c_str());
+    return(nullptr);
+  }
+
+  return(item);
+}
+
+
+bool get_numeric_value_from_json(cJSON *json_object, const ml_string &name, ml_uint &value) {
+  cJSON *item = get_number_item_from_json(json_object, name);
+  if(!item) {
+    return(false);
+  }
+  value = item->valueint;
+  return(true);
+}
+
+
+bool get_double_value_from_json(cJSON *json_object, const ml_string &name, ml_double &value) {
+  cJSON *item = get_number_item_from_json(json_object, name);
+  if(!item) {
+    return(false);
+  }
+  value = item->valuedouble;
+  return(true);
+}
+
+
+bool get_float_value_from_json(cJSON *json_object, const ml_string &name, ml_float &value) {
+  ml_double dbl_value=0;
+  get_double_value_from_json(json_object, name, dbl_value);
+  value = dbl_value;
+  return(true);
+}
+
+
+bool get_bool_value_from_json(cJSON *json_object, const ml_string &name, bool &value) {
+  ml_uint value_as_int = 0;
+  if(!get_numeric_value_from_json(json_object, name, value_as_int)) {
+    return(false);
+  }
+
+  value = (value_as_int != 0) ? true : false;
+
+  return(true);
+}
+
+
+bool get_modeltype_value_from_json(cJSON *json_object, const ml_string &name, ml_model_type &value) {
+  ml_uint value_as_int = 0;
+  if(!get_numeric_value_from_json(json_object, name, value_as_int)) {
+    return(false);
+  }
+
+  value = (ml_model_type)value_as_int;
+
   return(true);
 }
 

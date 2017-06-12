@@ -20,7 +20,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-#include "machinelearning.h"
+#include "mldata.h"
 
 #include <iostream>
 #include <istream>
@@ -39,6 +39,7 @@ namespace puml {
 const ml_float ML_VERSION = 0.1; 
 const ml_string ML_UNKNOWN_DISCRETE_CATEGORY = "<unknown>";
 const ml_float MISSING_CONTINUOUS_FEATURE_VALUE = std::numeric_limits<ml_float>::lowest();
+const ml_uint ML_DEFAULT_SEED = 42;
 
 //
 // one per feature, used for online avg/variance calc 
@@ -52,17 +53,6 @@ typedef struct {
   ml_vector<ml_uint> missing_data_instance_indices;
 
 } ml_stats_helper;
-
-
-ml_rng_config *createRngConfigWithSeed(ml_uint seed) {
-  ml_rng_config *rng_config = new ml_rng_config;
-  rng_config->rng.seed((seed > 0) ? seed : std::chrono::high_resolution_clock::now().time_since_epoch().count());
-  return(rng_config);
-}
-
-ml_uint generateRandomNumber(ml_rng_config *rng_config) {
-  return(rng_config ? rng_config->rng() : 0);
-}
 
 
 static ml_string stringTrimLeadingTrailingWhitespace(ml_string &str) {
@@ -153,10 +143,10 @@ static bool initInstanceDefinition(ml_instance_definition &mlid, const ml_vector
       continue;
     }
 
-    ml_feature_desc mlfd = {};
-    mlfd.name = instance_definition_strings[0];
-    mlfd.type = (instance_definition_strings[1] == ML_INSTANCE_DEF_CONTINUOUS_TOKEN) ? ML_FEATURE_TYPE_CONTINUOUS : ML_FEATURE_TYPE_DISCRETE;
-    mlfd.preserve_missing = ((def_strings_size == 3) && (instance_definition_strings[2] == ML_INSTANCE_DEF_PRESERVE_MISSING_TOKEN)) ? true : false;
+    ml_feature_desc_ptr mlfd = std::make_shared<ml_feature_desc>();
+    mlfd->name = instance_definition_strings[0];
+    mlfd->type = (instance_definition_strings[1] == ML_INSTANCE_DEF_CONTINUOUS_TOKEN) ? ml_feature_type::continuous : ml_feature_type::discrete;
+    mlfd->preserve_missing = ((def_strings_size == 3) && (instance_definition_strings[2] == ML_INSTANCE_DEF_PRESERVE_MISSING_TOKEN)) ? true : false;
     mlid.push_back(mlfd);
 
     ml_stats_helper sh = {};
@@ -167,7 +157,7 @@ static bool initInstanceDefinition(ml_instance_definition &mlid, const ml_vector
 }
 
 static bool isValueMissing(const ml_string &value) {
-  return((value == "") || (value == "?"));
+  return((value == "") || (value == "?") || (value == "NA"));
 }
 
 static void addDiscreteValueToFeatureDesc(const ml_string &value, int index, ml_feature_desc &mlfd) {
@@ -231,9 +221,9 @@ static bool processInstanceFeatures(ml_instance_definition &mlid, ml_data &mld, 
       // instance index so that later we can populate using the mean or mode.
       //
       stats_helper[feature_index].missing_data_instance_indices.push_back(mld.size());
-      mlid[feature_index].missing += 1;
+      mlid[feature_index]->missing += 1;
     }
-    else if(mlid[feature_index].type == ML_FEATURE_TYPE_CONTINUOUS) {
+    else if(mlid[feature_index]->type == ml_feature_type::continuous) {
       //
       // Convert from string and update the online mean/variance calculation.
       //
@@ -242,7 +232,7 @@ static bool processInstanceFeatures(ml_instance_definition &mlid, ml_data &mld, 
       }
       catch(...) {
 	puml::log_error("non-numeric value: '%s' given for continuous feature '%s'\n",
-		       features_as_string[str_index].c_str(), mlid[feature_index].name.c_str());
+		       features_as_string[str_index].c_str(), mlid[feature_index]->name.c_str());
 	return(false);
       }
 
@@ -250,10 +240,10 @@ static bool processInstanceFeatures(ml_instance_definition &mlid, ml_data &mld, 
     }
     else { 
       //
-      // ML_FEATURE_TYPE_DISCRETE 
+      // ml_feature_type::discrete 
       //
-      mlfv.discrete_value_index = findDiscreteValueIndexForValue(features_as_string[str_index], mlid[feature_index]);
-      mlid[feature_index].discrete_values_count[mlfv.discrete_value_index] += 1;
+      mlfv.discrete_value_index = findDiscreteValueIndexForValue(features_as_string[str_index], *mlid[feature_index]);
+      mlid[feature_index]->discrete_values_count[mlfv.discrete_value_index] += 1;
     }
 
     mli->push_back(mlfv);
@@ -267,7 +257,7 @@ static bool processInstanceFeatures(ml_instance_definition &mlid, ml_data &mld, 
 
 static void findModeValueIndexForDiscreteFeature(ml_feature_desc &mlfd) {
   
-  if(mlfd.type != ML_FEATURE_TYPE_DISCRETE) {
+  if(mlfd.type != ml_feature_type::discrete) {
     return;
   }
 
@@ -287,13 +277,13 @@ static void calcMeanOrModeOfFeatures(ml_instance_definition &mlid, ml_data &mld,
   // iterate over all features and compute the mean/std for continuous, and find the mode for discrete features.
   //
   for(std::size_t ii = 0; ii < mlid.size(); ++ii) {
-    switch(mlid[ii].type) {
-    case ML_FEATURE_TYPE_CONTINUOUS:
-      mlid[ii].mean = stats_helper[ii].mean;
-      mlid[ii].sd = (stats_helper[ii].count < 2) ? 0.0 : (sqrt(stats_helper[ii].M2 / (stats_helper[ii].count - 1)));
+    switch(mlid[ii]->type) {
+    case ml_feature_type::continuous:
+      mlid[ii]->mean = stats_helper[ii].mean;
+      mlid[ii]->sd = (stats_helper[ii].count < 2) ? 0.0 : (sqrt(stats_helper[ii].M2 / (stats_helper[ii].count - 1)));
       break;
-    case ML_FEATURE_TYPE_DISCRETE:
-      findModeValueIndexForDiscreteFeature(mlid[ii]);
+    case ml_feature_type::discrete:
+      findModeValueIndexForDiscreteFeature(*mlid[ii]);
       break;  
     default: log_warn("unknown feature type...\n");
       break;
@@ -310,12 +300,12 @@ static void fillMissingInstanceFeatureValues(ml_instance_definition &mlid, ml_da
     for(std::size_t jj=0; jj < stats_helper[findex].missing_data_instance_indices.size(); ++jj) {
       ml_uint instance_index = stats_helper[findex].missing_data_instance_indices[jj];
       ml_instance &instance = (*mld[instance_index]);
-      if(mlid[findex].type == ML_FEATURE_TYPE_CONTINUOUS) {
-	instance[findex].continuous_value = mlid[findex].preserve_missing ? MISSING_CONTINUOUS_FEATURE_VALUE : mlid[findex].mean;
+      if(mlid[findex]->type == ml_feature_type::continuous) {
+	instance[findex].continuous_value = mlid[findex]->preserve_missing ? MISSING_CONTINUOUS_FEATURE_VALUE : mlid[findex]->mean;
 	//log("setting missing cont feature %zu of instance %d to %.3f\n", findex, instance_index, instance[findex].continuous_value); 
       }
       else {
-	instance[findex].discrete_value_index = mlid[findex].preserve_missing ? 0 : mlid[findex].discrete_mode_index;
+	instance[findex].discrete_value_index = mlid[findex]->preserve_missing ? 0 : mlid[findex]->discrete_mode_index;
 	//log("setting missing cont feature %zu of instance %d to index %d\n", findex, instance_index, instance[findex].discrete_value_index);
       }
     }
@@ -329,17 +319,17 @@ static bool instanceDefinitionsMatch(const ml_instance_definition &mlid, const m
   }
 
   for(std::size_t ii = 0; ii < mlid.size(); ++ii) {
-    if(mlid[ii].type != mlid_temp[ii].type) {
+    if(mlid[ii]->type != mlid_temp[ii]->type) {
       return(false);
     }
     
-    if(mlid[ii].name != mlid_temp[ii].name) {
+    if(mlid[ii]->name != mlid_temp[ii]->name) {
       return(false);
     }
 
-    if(discreteCategoryCheck && (mlid[ii].type == ML_FEATURE_TYPE_DISCRETE)) {
-      if(mlid[ii].discrete_values.size() < mlid_temp[ii].discrete_values.size()) {
-	log_warn("category count mismatch: %zu vs %zu, feature %s\n", mlid[ii].discrete_values.size()-1, mlid_temp[ii].discrete_values.size()-1, mlid[ii].name.c_str());
+    if(discreteCategoryCheck && (mlid[ii]->type == ml_feature_type::discrete)) {
+      if(mlid[ii]->discrete_values.size() < mlid_temp[ii]->discrete_values.size()) {
+	log_warn("category count mismatch: %zu vs %zu, feature %s\n", mlid[ii]->discrete_values.size()-1, mlid_temp[ii]->discrete_values.size()-1, mlid[ii]->name.c_str());
       }
     }
   }
@@ -426,8 +416,9 @@ static bool loadInstanceDataFromFile(const ml_string &path_to_input_file, ml_ins
   return(true);
 }
 
-bool loadInstanceDataFromFileUsingInstanceDefinition(const ml_string &path_to_input_file, const ml_instance_definition &mlid, 
-						     ml_data &mld, ml_vector<ml_string> *ids) {
+bool load_data_using_instance_definition(const ml_string &path_to_input_file, 
+					 const ml_instance_definition &mlid, 
+					 ml_data &mld, ml_vector<ml_string> *ids) {
 
   ml_instance_definition temp_mlid(mlid);
   if(!loadInstanceDataFromFile(path_to_input_file, temp_mlid, mld, ids)) {
@@ -442,24 +433,24 @@ bool loadInstanceDataFromFileUsingInstanceDefinition(const ml_string &path_to_in
   return(true);
 }
 
-bool loadInstanceDataFromFile(const ml_string &path_to_input_file, ml_instance_definition &mlid, ml_data &mld) {
+bool load_data(const ml_string &path_to_input_file, ml_instance_definition &mlid, ml_data &mld) {
   mlid.clear();
   return(loadInstanceDataFromFile(path_to_input_file, mlid, mld, nullptr));
 }
 
-void printInstanceDataSummary(const ml_instance_definition &mlid) {
+void print_data_summary(const ml_instance_definition &mlid) {
 
   log("\n\n*** Data Summary ***\n\n");
 
   for(std::size_t ii = 0; ii < mlid.size(); ++ii) {
-    log("feature %zu: %s, missing: %d\n", ii, mlid[ii].name.c_str(), mlid[ii].missing);
-    if(mlid[ii].type == ML_FEATURE_TYPE_CONTINUOUS) {
-      log("     mean: %.3f  std: %.3f\n\n", mlid[ii].mean, mlid[ii].sd);
+    log("feature %zu: %s, missing: %d\n", ii, mlid[ii]->name.c_str(), mlid[ii]->missing);
+    if(mlid[ii]->type == ml_feature_type::continuous) {
+      log("     mean: %.3f  std: %.3f\n\n", mlid[ii]->mean, mlid[ii]->sd);
     }
     else {
-      const ml_feature_desc &mlfd = mlid[ii];
-      for(std::size_t ii=1; ii < mlfd.discrete_values.size(); ++ii) {
-	log("  category %zu: %s, count: %d\n", ii, mlfd.discrete_values[ii].c_str(), mlfd.discrete_values_count[ii]);
+      const ml_feature_desc &mlfd = *mlid[ii];
+      for(std::size_t jj=1; jj < mlfd.discrete_values.size(); ++jj) {
+	log("  category %zu: %s, count: %d\n", jj, mlfd.discrete_values[jj].c_str(), mlfd.discrete_values_count[jj]);
       }
       log("\n");
     }
@@ -468,104 +459,9 @@ void printInstanceDataSummary(const ml_instance_definition &mlid) {
 }
 
 
-void collectRegressionResultForInstance(const ml_instance_definition &mlid, ml_uint index_of_feature_to_predict, const ml_instance &instance, 
-					const ml_feature_value *result, ml_regression_results &mlrr) {
-
-  if(!result) {
-    log_warn("nil regression result...\n");
-    return;
-  }
-
-  ml_double diff = result->continuous_value - instance[index_of_feature_to_predict].continuous_value;
-  mlrr.sum_absolute_error += fabs(diff);
-  mlrr.sum_mean_squared_error += (diff * diff);
-  
-  /* Log Loss
-  const ml_double epsilon = 1e-15;
-  ml_double pred = result->continuous_value;
-  pred = std::max(epsilon, pred);
-  pred = std::min(1.0 - epsilon, pred);
-  mlrr.sum_log_loss += (instance[index_of_feature_to_predict].continuous_value > 0.0) ? log(pred) : log(1.0 - pred);
-  */
-
-  mlrr.instances += 1;
-}
-
-void printRegressionResultsSummary(const ml_regression_results &mlrr) {
-
-  log("\n*** Regression Results Summary ***\n");
-  log("\nInstances: %d\n", mlrr.instances);
-  
-  ml_double mae = (mlrr.instances > 0) ? (mlrr.sum_absolute_error / mlrr.instances) : 0.0;
-  log("Mean Absolute Error: %.3f\n", mae);
-
-  ml_double rmse = (mlrr.instances > 0) ? sqrt(mlrr.sum_mean_squared_error / mlrr.instances) : 0.0;
-  log("Root Mean Squared Error: %.3f\n", rmse);
-
-  //ml_double log_loss = (mlrr.instances > 0) ? ((-1.0 * mlrr.sum_log_loss) / mlrr.instances) : 0.0;
-  //log("Log Loss: %.3f\n", log_loss);
-
-  log("\n");
-}
-
-void collectClassificationResultForInstance(const ml_instance_definition &mlid, ml_uint index_of_feature_to_predict, const ml_instance &instance, 
-					    const ml_feature_value *result, ml_classification_results &mlcr) {
-   if(!result) {
-     log_warn("nil classification result...\n");
-     return;
-   }
-
-   std::ostringstream ss;
-   ml_uint model = result->discrete_value_index;
-   ml_uint actual = instance[index_of_feature_to_predict].discrete_value_index;
-   ss << actual << "-" << model;
-   mlcr.confusion_matrix_map[ss.str()] += 1;
-   mlcr.instances += 1;
-   mlcr.instances_correctly_classified += (model == actual) ? 1 : 0;
-}
-
-void printClassificationResultsSummary(const ml_instance_definition &mlid, ml_uint index_of_feature_to_predict, const ml_classification_results &mlcr) {
- 
-  log("\n*** Classification Results Summary ***\n");
-  log("\nInstances: %d\n", mlcr.instances);
-  ml_float pct = (mlcr.instances > 0) ? ((ml_float) mlcr.instances_correctly_classified / mlcr.instances) * 100.0 : 0.0;
-  log("Correctly Classified: %d (%.0f%%)\n\n", mlcr.instances_correctly_classified, pct);
-
-  // only show the confusion matrix for a reasonable number of categories
-  if(mlid[index_of_feature_to_predict].discrete_values.size() > 20) {
-    return;
-  }
-
-  for(std::size_t ii=1; ii < mlid[index_of_feature_to_predict].discrete_values.size(); ++ii) {
-    log("%7c", ((char)(ii-1)) + 'a');
-  }
-  
-  log("  <-- classified as\n");
-
-  for(std::size_t ii=1; ii < mlid[index_of_feature_to_predict].discrete_values.size(); ++ii) {
-    for(std::size_t jj=1; jj < mlid[index_of_feature_to_predict].discrete_values.size(); ++jj) {
-      std::ostringstream ss;
-      ss << ii << "-" << jj;
-      ml_uint count = 0;
-      ml_map<ml_string, ml_uint>::const_iterator it = mlcr.confusion_matrix_map.find(ss.str());
-      if(it != mlcr.confusion_matrix_map.end()) {
-	count = it->second;
-      }
-
-      log("%7d", count);
-    }
-    
-    log(" | %c = %s\n", ((char)(ii-1)) + 'a', mlid[index_of_feature_to_predict].discrete_values[ii].c_str());
-  }
-
-  log("\n");
-
-}
-
-
-void splitDataIntoTrainingAndTest(ml_data &mld, ml_float training_factor, 
-				  ml_rng_config *rng_config, ml_data &training, 
-				  ml_data &test) {
+void split_data_into_training_and_test(ml_data &mld, ml_float training_factor, 
+				       ml_data &training, ml_data &test,
+				       ml_uint seed) {
   
   training.clear();
   test.clear();
@@ -579,14 +475,16 @@ void splitDataIntoTrainingAndTest(ml_data &mld, ml_float training_factor,
     return;
   }
 
+  ml_rng rng(seed);
+  shuffle_vector(mld, rng);
   ml_uint training_size = (ml_uint) ((training_factor * mld.size()) + 0.5);
-  shuffleVector(mld, rng_config);
   training = ml_data(mld.begin(), mld.begin() + training_size);
   mld.erase(mld.begin(), mld.begin() + training_size);
   test = ml_data(mld.begin(), mld.end());
 }
 
-bool writeModelJSONToFile(const ml_string &path_to_file, cJSON *json_object) {
+bool write_model_json_to_file(const ml_string &path_to_file, 
+			      cJSON *json_object) {
 
   if(!json_object) {
     log_error("nil json object...\n");
@@ -616,7 +514,7 @@ bool writeModelJSONToFile(const ml_string &path_to_file, cJSON *json_object) {
   return(true);
 }
 
-cJSON *readModelJSONFromFile(const ml_string &path_to_file) {
+cJSON *read_model_json_from_file(const ml_string &path_to_file) {
   FILE *fp = fopen(path_to_file.c_str(), "r");
   if(!fp) {
     log_error("couldn't open model file: %s\n", path_to_file.c_str());
@@ -665,28 +563,28 @@ static cJSON *createJSONObjectFromInstanceDefinition(const ml_instance_definitio
 
   for(std::size_t ii =0; ii < mlid.size(); ++ii) {
     cJSON *json_feature_desc = cJSON_CreateObject();
-    cJSON_AddStringToObject(json_feature_desc, "name", mlid[ii].name.c_str());
-    cJSON_AddNumberToObject(json_feature_desc, "type", mlid[ii].type);
-    cJSON_AddNumberToObject(json_feature_desc, "missing", mlid[ii].missing);
-    cJSON_AddNumberToObject(json_feature_desc, "preserve_missing", (mlid[ii].preserve_missing ? 1 : 0));
+    cJSON_AddStringToObject(json_feature_desc, "name", mlid[ii]->name.c_str());
+    cJSON_AddNumberToObject(json_feature_desc, "type", (double) mlid[ii]->type);
+    cJSON_AddNumberToObject(json_feature_desc, "missing", mlid[ii]->missing);
+    cJSON_AddNumberToObject(json_feature_desc, "preserve_missing", (mlid[ii]->preserve_missing ? 1 : 0));
     
-    if(mlid[ii].type == ML_FEATURE_TYPE_CONTINUOUS) {
-      cJSON_AddNumberToObject(json_feature_desc, "mean", mlid[ii].mean);
-      cJSON_AddNumberToObject(json_feature_desc, "sd", mlid[ii].sd);
+    if(mlid[ii]->type == ml_feature_type::continuous) {
+      cJSON_AddNumberToObject(json_feature_desc, "mean", mlid[ii]->mean);
+      cJSON_AddNumberToObject(json_feature_desc, "sd", mlid[ii]->sd);
     }
     else {
-      cJSON_AddNumberToObject(json_feature_desc, "discrete_mode_index", mlid[ii].discrete_mode_index);
+      cJSON_AddNumberToObject(json_feature_desc, "discrete_mode_index", mlid[ii]->discrete_mode_index);
 
       cJSON *json_values_array = cJSON_CreateArray();
       cJSON_AddItemToObject(json_feature_desc, "discrete_values", json_values_array);
-      for(std::size_t jj = 0; jj < mlid[ii].discrete_values.size(); ++jj) {
-	cJSON_AddItemToArray(json_values_array, cJSON_CreateString(mlid[ii].discrete_values[jj].c_str()));
+      for(std::size_t jj = 0; jj < mlid[ii]->discrete_values.size(); ++jj) {
+	cJSON_AddItemToArray(json_values_array, cJSON_CreateString(mlid[ii]->discrete_values[jj].c_str()));
       }
       
       cJSON *json_values_count_array = cJSON_CreateArray();
       cJSON_AddItemToObject(json_feature_desc, "discrete_values_count", json_values_count_array);
-      for(std::size_t jj = 0; jj < mlid[ii].discrete_values_count.size(); ++jj) {
-	cJSON_AddItemToArray(json_values_count_array, cJSON_CreateNumber(mlid[ii].discrete_values_count[jj]));
+      for(std::size_t jj = 0; jj < mlid[ii]->discrete_values_count.size(); ++jj) {
+	cJSON_AddItemToArray(json_values_count_array, cJSON_CreateNumber(mlid[ii]->discrete_values_count[jj]));
       }
     }
 
@@ -707,7 +605,7 @@ static bool validateJSONFeatureDesc(cJSON *fdesc) {
   }
 
   ml_feature_type type = (ml_feature_type) cJSON_GetObjectItem(fdesc, "type")->valueint;
-  if(type == ML_FEATURE_TYPE_CONTINUOUS) {
+  if(type == ml_feature_type::continuous) {
     if(!cJSON_GetObjectItem(fdesc, "mean") ||
        !cJSON_GetObjectItem(fdesc, "sd")) {
       return(false);
@@ -761,28 +659,28 @@ static bool createInstanceDefinitionFromJSONObject(cJSON *json_object, ml_instan
       return(false);
     }
 
-    ml_feature_desc mlfd = {};
-    mlfd.name = cJSON_GetObjectItem(fdesc, "name")->valuestring;
-    mlfd.type = (ml_feature_type) cJSON_GetObjectItem(fdesc, "type")->valueint;
-    mlfd.missing = cJSON_GetObjectItem(fdesc, "missing")->valueint;
-    mlfd.preserve_missing = (cJSON_GetObjectItem(fdesc, "missing")->valueint > 0) ? true : false;
+    ml_feature_desc_ptr mlfd = std::make_shared<ml_feature_desc>();
+    mlfd->name = cJSON_GetObjectItem(fdesc, "name")->valuestring;
+    mlfd->type = (ml_feature_type) cJSON_GetObjectItem(fdesc, "type")->valueint;
+    mlfd->missing = cJSON_GetObjectItem(fdesc, "missing")->valueint;
+    mlfd->preserve_missing = (cJSON_GetObjectItem(fdesc, "missing")->valueint > 0) ? true : false;
     
-    if(mlfd.type == ML_FEATURE_TYPE_CONTINUOUS) {
-      mlfd.mean = cJSON_GetObjectItem(fdesc, "mean")->valuedouble;
-      mlfd.sd = cJSON_GetObjectItem(fdesc, "sd")->valuedouble;
+    if(mlfd->type == ml_feature_type::continuous) {
+      mlfd->mean = cJSON_GetObjectItem(fdesc, "mean")->valuedouble;
+      mlfd->sd = cJSON_GetObjectItem(fdesc, "sd")->valuedouble;
     }
     else {
-      mlfd.discrete_mode_index = cJSON_GetObjectItem(fdesc, "discrete_mode_index")->valueint;
+      mlfd->discrete_mode_index = cJSON_GetObjectItem(fdesc, "discrete_mode_index")->valueint;
       
       cJSON *values_array = cJSON_GetObjectItem(fdesc, "discrete_values");
       for(int jj=0; jj < cJSON_GetArraySize(values_array); ++jj) {
-	mlfd.discrete_values.push_back(cJSON_GetArrayItem(values_array, jj)->valuestring);
-	mlfd.discrete_values_map[cJSON_GetArrayItem(values_array, jj)->valuestring] = jj;
+	mlfd->discrete_values.push_back(cJSON_GetArrayItem(values_array, jj)->valuestring);
+	mlfd->discrete_values_map[cJSON_GetArrayItem(values_array, jj)->valuestring] = jj;
       }
 
       cJSON *values_count_array = cJSON_GetObjectItem(fdesc, "discrete_values_count");
       for(int jj=0; jj < cJSON_GetArraySize(values_count_array); ++jj) {
-	mlfd.discrete_values_count.push_back(cJSON_GetArrayItem(values_count_array, jj)->valueint);
+	mlfd->discrete_values_count.push_back(cJSON_GetArrayItem(values_count_array, jj)->valueint);
       }
     }
     
@@ -793,23 +691,24 @@ static bool createInstanceDefinitionFromJSONObject(cJSON *json_object, ml_instan
 }
 
 
-bool writeInstanceDefinitionToFile(const ml_string &path_to_file, const ml_instance_definition &mlid) {
+bool write_instance_definition_to_file(const ml_string &path_to_file, 
+				       const ml_instance_definition &mlid) {
   cJSON *json_object = createJSONObjectFromInstanceDefinition(mlid);
   if(!json_object) {
     log_error("couldn't create json object from instance definition\n");
     return(false);
   }
 
-  bool status = writeModelJSONToFile(path_to_file, json_object);
+  bool status = write_model_json_to_file(path_to_file, json_object);
   cJSON_Delete(json_object);
 
   return(status);
 }
 
 
-bool readInstanceDefinitionFromFile(const ml_string &path_to_file, ml_instance_definition &mlid) {
+bool read_instance_definition_from_file(const ml_string &path_to_file, ml_instance_definition &mlid) {
   mlid.clear();
-  cJSON *json_object = readModelJSONFromFile(path_to_file);
+  cJSON *json_object = read_model_json_from_file(path_to_file);
   if(!json_object) {
     log_error("couldn't load instance definition json object from model file: %s\n", path_to_file.c_str());
     return(false);
@@ -828,17 +727,17 @@ static void createOneHotEncodingInstanceDefinition(const ml_instance_definition 
   // create the new mlid with discrete feature categories mapped to continuous features
   //
   for(std::size_t findex = 0; findex < mlid.size(); ++findex) {
-    const ml_feature_desc &fdesc = mlid[findex];
-    if((fdesc.type == ML_FEATURE_TYPE_CONTINUOUS) || (fdesc.name == name_of_index_to_predict)) {
-      mlid_ohe.push_back(fdesc);
+    const ml_feature_desc &fdesc = *mlid[findex];
+    if((fdesc.type == ml_feature_type::continuous) || (fdesc.name == name_of_index_to_predict)) {
+      mlid_ohe.push_back(mlid[findex]);
       ml_stats_helper sh = {};
       stats_helper.push_back(sh);
     }
     else {
       for(std::size_t value_index = (fdesc.preserve_missing ? 0 : 1); value_index < fdesc.discrete_values.size(); ++value_index) {
-	ml_feature_desc ohe_fdesc = {};
-	ohe_fdesc.type = ML_FEATURE_TYPE_CONTINUOUS;
-	ohe_fdesc.name = fdesc.name + "_" + fdesc.discrete_values[value_index];
+	ml_feature_desc_ptr ohe_fdesc = std::make_shared<ml_feature_desc>();
+	ohe_fdesc->type = ml_feature_type::continuous;
+	ohe_fdesc->name = fdesc.name + "_" + fdesc.discrete_values[value_index];
 	mlid_ohe.push_back(ohe_fdesc);
 	ml_stats_helper sh = {};
 	stats_helper.push_back(sh);
@@ -858,10 +757,10 @@ static void createOneHotEncodingForData(const ml_instance_definition &mlid, cons
     ml_instance_ptr inst_ohe = std::make_shared<ml_instance>();
     
     for(std::size_t findex = 0; findex < mlid.size(); ++findex) {
-      const ml_feature_desc &fdesc = mlid[findex];
+      const ml_feature_desc &fdesc = *mlid[findex];
    
       // just copy the continuous features (and feature to predict)
-      if((fdesc.type == ML_FEATURE_TYPE_CONTINUOUS) || (fdesc.name == name_of_feature_to_predict)) {
+      if((fdesc.type == ml_feature_type::continuous) || (fdesc.name == name_of_feature_to_predict)) {
 	inst_ohe->push_back(inst[findex]);
       }
       else { // use 1.0 for the ohe feature that represents this instance's category of the original discrete feature, 0.0 otherwise.
@@ -887,15 +786,15 @@ static void updateStatsForOneHotEncoding(ml_instance_definition &mlid_ohe, const
       continue;
     }
 
-    mlid_ohe[findex].mean = stats_helper[findex].mean;
-    mlid_ohe[findex].sd = (stats_helper[findex].count < 2) ? 0.0 : (sqrt(stats_helper[findex].M2 / (stats_helper[findex].count - 1)));
+    mlid_ohe[findex]->mean = stats_helper[findex].mean;
+    mlid_ohe[findex]->sd = (stats_helper[findex].count < 2) ? 0.0 : (sqrt(stats_helper[findex].M2 / (stats_helper[findex].count - 1)));
   }
 
 }
 
-bool createOneHotEncodingForData(const ml_instance_definition &mlid, const ml_data &mld, 
-				 const ml_string &name_of_feature_to_predict, 
-				 ml_instance_definition &mlid_ohe, ml_data &mld_ohe) {
+bool create_onehotencoding_for_data(const ml_instance_definition &mlid, const ml_data &mld, 
+				    const ml_string &name_of_feature_to_predict, 
+				    ml_instance_definition &mlid_ohe, ml_data &mld_ohe) {
 
   mlid_ohe.clear();
   mld_ohe.clear();
@@ -908,15 +807,15 @@ bool createOneHotEncodingForData(const ml_instance_definition &mlid, const ml_da
   return(true);
 }
 
-ml_uint indexOfFeatureWithName(const ml_string &feature_name, const ml_instance_definition &mlid) {
+ml_uint index_of_feature_with_name(const ml_string &feature_name, const ml_instance_definition &mlid) {
   for(std::size_t ii = 0; ii < mlid.size(); ++ii) {
-    if(mlid[ii].name == feature_name) {
+    if(mlid[ii]->name == feature_name) {
       return(ii);
     }
   }
 
-  log_error("couldn't find feature with name '%s' in the instance definition...\n", feature_name.c_str());
-  exit(1);
+  ml_string msg = "index_of_feature_with_name(): couldn't find feature with name " + feature_name;
+  throw std::invalid_argument(msg);
 }
 
 

@@ -1,7 +1,7 @@
 .PHONY = all debug mltest clean 
 
 CXX = /usr/bin/g++
-CXXFLAGS = -O2 -flto -Wall -std=c++11
+CXXFLAGS = -O2 -flto -Wall -Wshadow -std=c++11
 LDDFLAGS = -flto -lpumlbrent -lpthread
 
 UNAME_S := $(shell uname -s)
@@ -17,7 +17,7 @@ debug: clean mltest
 
 mltest:
 	$(CXX) $(CXXFLAGS) -fPIC -rdynamic -shared -x c++ brent/brent.c -o libpumlbrent.so
-	$(CXX) $(CXXFLAGS) -L . mltest.cpp machinelearning.cpp mlutil.cpp logging.cpp knn.cpp kmeans.cpp decisiontree.cpp randomforest.cpp boosting.cpp cJSON/cJSON.cpp -o mltest $(LDDFLAGS)
+	$(CXX) $(CXXFLAGS) -L . mltest.cpp mldata.cpp mlresults.cpp mlutil.cpp logging.cpp decisiontree.cpp randomforest.cpp boosting.cpp knn.cpp kmeans.cpp cJSON/cJSON.cpp -o mltest $(LDDFLAGS)
 
 clean: 
 	rm -f ./libpumlbrent.so

@@ -22,69 +22,91 @@ SOFTWARE.
 
 #include "knn.h"
 #include <algorithm>
+#include <map>
 
 namespace puml {
 
-static bool validateInput(const ml_instance_definition &mlid, const ml_data &mld, 
-			  const ml_instance &instance, ml_uint k, ml_uint index_of_feature_to_predict) {
+
+knn::knn(const ml_instance_definition &mlid,
+	 const ml_string &feature_to_predict,
+	 const ml_uint k) : 
+  mlid_(mlid),
+  index_of_feature_to_predict_(index_of_feature_with_name(feature_to_predict, mlid)),
+  k_(k) {
+
+  type_ = (mlid_[index_of_feature_to_predict_]->type == ml_feature_type::discrete) ? ml_model_type::classification : ml_model_type::regression;
+}
+
+
+static bool validate_input(const ml_instance_definition &mlid, const ml_data &mld, 
+			   ml_uint k, ml_uint index_of_feature_to_predict) {
 			
   if(mlid.empty()) {
-    log_error("empty instance definition...\n");
+    log_error("knn: empty instance definition...\n");
     return(false);
   }
 
   if(mld.empty()) {
-    log_error("empty neighbor list...\n");
-    return(false);
-  }
-
-  if(instance.size() != mlid.size()) {
-    log_error("mismatch b/t instance and definition sizes...\n");
+    log_error("knn: empty training data...\n");
     return(false);
   }
 
   if(index_of_feature_to_predict >= mlid.size()) {
-    log_error("invalid feature to predict...\n");
+    log_error("knn: invalid feature to predict...\n");
     return(false);
   }
 
+  if(k == 0) {
+    log_error("knn: k must be > 0\n");
+    return(false);
+  }
+
+  bool has_discrete_features = false;
+  bool has_continuous_features = false;
   for(std::size_t ii=0; ii < mlid.size(); ++ii) {
 
     if(ii == index_of_feature_to_predict) {
       continue;
     }
 
-    if(mlid[ii].type != ML_FEATURE_TYPE_CONTINUOUS) {
-      log_error("'%s' is not a continuous feature...\n", mlid[ii].name.c_str());
-      return(false);
+    if(mlid[ii]->type == ml_feature_type::discrete) {
+      has_discrete_features = true;
+    }
+    else {
+      has_continuous_features = true;
     }
   }
 
-  if(k == 0) {
-    log_error("k must be > 0\n");
+  if(!has_continuous_features) {
+    log_error("knn: no continuous features...");
     return(false);
+  }
+
+  if(has_discrete_features) {
+    log_warn("knn: discrete (categorical) features will be ignored...\n");
   }
 
   return(true);
 }
 
-static void predictUsingNeighbors(const ml_vector<knn_neighbor> &all_distances, const ml_instance_definition &mlid, 
-				  ml_uint k, ml_uint index_of_feature_to_predict, ml_feature_value &prediction, 
-				  ml_vector<knn_neighbor> *neighbors_considered) {
+
+static void predict_using_neighbors(const ml_vector<knn_neighbor> &all_distances, 
+				    const ml_instance_definition &mlid, 
+				    ml_uint k, ml_uint index_of_feature_to_predict, 
+				    ml_feature_value &prediction, 
+				    ml_vector<knn_neighbor> &neighbors_considered) {
 
   ml_double continuous_sum = 0;
   ml_uint continuous_count = 0;
-  ml_map<ml_uint, ml_uint> discrete_mode_map;
+  std::map<ml_uint, ml_uint> discrete_mode_map;
 
   for(std::size_t dist_index = 0; (dist_index < k) && (dist_index < all_distances.size()); ++dist_index) {
     
     ml_instance_ptr neighbor = all_distances[dist_index].second;
     
-    if(neighbors_considered) {
-      neighbors_considered->push_back(all_distances[dist_index]);
-    }
+    neighbors_considered.push_back(all_distances[dist_index]);
 
-    if(mlid[index_of_feature_to_predict].type == ML_FEATURE_TYPE_CONTINUOUS) {
+    if(mlid[index_of_feature_to_predict]->type == ml_feature_type::continuous) {
       continuous_sum += (*neighbor)[index_of_feature_to_predict].continuous_value;
       continuous_count += 1;
     }
@@ -94,12 +116,12 @@ static void predictUsingNeighbors(const ml_vector<knn_neighbor> &all_distances, 
 
   }
 
-  if(mlid[index_of_feature_to_predict].type == ML_FEATURE_TYPE_CONTINUOUS) {
+  if(mlid[index_of_feature_to_predict]->type == ml_feature_type::continuous) {
     prediction.continuous_value = (continuous_sum / continuous_count);
   }
   else {
     ml_uint max_index = 0, max_count = 0;
-    for(ml_map<ml_uint, ml_uint>::iterator it = discrete_mode_map.begin(); it != discrete_mode_map.end(); ++it) {
+    for(auto it = discrete_mode_map.begin(); it != discrete_mode_map.end(); ++it) {
       if(it->second > max_count) {
 	max_count = it->second;
 	max_index = it->first;
@@ -111,18 +133,20 @@ static void predictUsingNeighbors(const ml_vector<knn_neighbor> &all_distances, 
 
 }
 
-bool findNearestNeighborsForInstance(const ml_instance_definition &mlid, const ml_data &mld, const ml_instance &instance, 
-				     ml_uint k, ml_uint index_of_feature_to_predict, ml_feature_value &prediction, 
-				     ml_vector<knn_neighbor> *neighbors_considered) {
-  
-  if(neighbors_considered) {
-    neighbors_considered->clear();
-  }
 
-  if(!validateInput(mlid, mld, instance, k, index_of_feature_to_predict)) {
+static bool find_nearest_neighbors_for_instance(const ml_instance_definition &mlid, 
+						const ml_data &mld, const ml_instance &instance, 
+						ml_uint k, ml_uint index_of_feature_to_predict, 
+						ml_feature_value &prediction, 
+						ml_vector<knn_neighbor> &neighbors_considered) {
+  
+  neighbors_considered.clear();
+
+  if(instance.size() != mlid.size()) {
+    log_error("knn: mismatch b/t instance and training instance sizes...\n");
     return(false);
   }
-
+  
   ml_vector<knn_neighbor> all_distances;
   
   for(std::size_t ii = 0; ii < mld.size(); ++ii) {
@@ -136,10 +160,13 @@ bool findNearestNeighborsForInstance(const ml_instance_definition &mlid, const m
 	continue;
       }
 
-      if(mlid[findex].sd > 0.0) {
-        // TODO: mld should be normalized once
-        ml_double norm_neighbor = (neighbor[findex].continuous_value - mlid[findex].mean) / mlid[findex].sd;
-        ml_double norm_inst = (instance[findex].continuous_value - mlid[findex].mean) / mlid[findex].sd;
+      if(mlid[findex]->type == ml_feature_type::discrete) {
+	continue;
+      }
+
+      if(mlid[findex]->sd > 0.0) {
+        ml_double norm_neighbor = (neighbor[findex].continuous_value - mlid[findex]->mean) / mlid[findex]->sd;
+        ml_double norm_inst = (instance[findex].continuous_value - mlid[findex]->mean) / mlid[findex]->sd;
         ml_double diff = norm_inst - norm_neighbor;
         dist += (diff * diff);
       }
@@ -150,41 +177,53 @@ bool findNearestNeighborsForInstance(const ml_instance_definition &mlid, const m
 
   std::sort(all_distances.begin(), all_distances.end());
 
-  predictUsingNeighbors(all_distances, mlid, k, index_of_feature_to_predict, prediction, neighbors_considered);
+  predict_using_neighbors(all_distances, mlid, k, 
+			  index_of_feature_to_predict, 
+			  prediction, neighbors_considered);
 
   return(true);
 } 
 
-bool printNearestNeighborsResultsForData(const ml_instance_definition &mlid, const ml_data &training,
-					 const ml_data &test, ml_uint k, ml_uint index_of_feature_to_predict) {
-  ml_classification_results cr = {};
-  ml_regression_results rr = {};
 
-  for(std::size_t ii = 0; ii < test.size(); ++ii) {
-
-    ml_feature_value prediction;
-    if(!findNearestNeighborsForInstance(mlid, training, *test[ii], k, index_of_feature_to_predict, prediction)) {
-      return(false);
-    }
-
-    if(mlid[index_of_feature_to_predict].type == ML_FEATURE_TYPE_CONTINUOUS) {
-      collectRegressionResultForInstance(mlid, index_of_feature_to_predict, *test[ii], &prediction, rr);
-    }
-    else {
-      collectClassificationResultForInstance(mlid, index_of_feature_to_predict, *test[ii], &prediction, cr);
-    }
-  }
-
-
-  if(mlid[index_of_feature_to_predict].type == ML_FEATURE_TYPE_CONTINUOUS) {
-    printRegressionResultsSummary(rr);
-  }
-  else {
-    printClassificationResultsSummary(mlid, index_of_feature_to_predict, cr);
+bool knn::train(const ml_data &mld) {
+  training_data_ = mld;
+  validated_ = validate_input(mlid_, training_data_, 
+			      k_, index_of_feature_to_predict_);
+  if(!validated_) {
+    return(false);
   }
 
   return(true);
 }
 
+
+ml_feature_value knn::evaluate(const ml_instance &instance, 
+			       ml_vector<knn_neighbor> &neighbors) const {
+  neighbors.clear();
+  ml_feature_value prediction = {};
+  if(!validated_) {
+    return(prediction);
+  }
+
+  find_nearest_neighbors_for_instance(mlid_, training_data_,
+				      instance, k_, 
+				      index_of_feature_to_predict_,
+				      prediction, neighbors);
+  return(prediction);
+}
+
+
+ml_feature_value knn::evaluate(const ml_instance &instance) const {
+  ml_vector<knn_neighbor> neighbors;
+  ml_feature_value prediction = evaluate(instance, neighbors);
+  return(prediction);
+}
+
+
+ml_string knn::summary() const {
+  ml_string desc = "\n\n*** kNN Summary ***\n\n";
+  desc += "k = " + std::to_string(k_);
+  return(desc);
+}
 
 } // namespace puml

@@ -22,18 +22,49 @@ SOFTWARE.
 
 #pragma once
 
-#include "machinelearning.h"
+#include "mldata.h"
 
 namespace puml {
 
-  typedef std::pair<ml_double, ml_instance_ptr> knn_neighbor; // distance and the instance 
+using knn_neighbor = std::pair<ml_double, ml_instance_ptr>; // distance and the instance 
   
-  bool findNearestNeighborsForInstance(const ml_instance_definition &mlid, const ml_data &mld, const ml_instance &instance, 
-				       ml_uint k, ml_uint index_of_feature_to_predict, ml_feature_value &prediction, 
-				       ml_vector<knn_neighbor> *neighbors_considered = nullptr);
-  
-  bool printNearestNeighborsResultsForData(const ml_instance_definition &mlid, const ml_data &training,
-					   const ml_data &test, ml_uint k, ml_uint index_of_feature_to_predict);
+class knn final {
 
-} 
+ public:
+
+  knn(const ml_instance_definition &mlid,
+      const ml_string &feature_to_predict,
+      const ml_uint k);
+
+  bool save(const ml_string &path) const { return(false); }
+  bool restore(const ml_string &path) { return(false); }
+  
+  bool train(const ml_data &mld);
+  ml_feature_value evaluate(const ml_instance &instance) const;
+  ml_feature_value evaluate(const ml_instance &instance, 
+			    ml_vector<knn_neighbor> &neighbors) const;
+  
+  ml_string summary() const;
+  
+  const ml_instance_definition &mlid() const { return(mlid_); }
+  ml_uint index_of_feature_to_predict() const { return(index_of_feature_to_predict_); }
+  ml_model_type type() const { return(type_); }
+
+  ml_uint k() const { return(k_); }
+  void set_k(ml_uint k) { k_ = k; validated_ = false;}
+
+
+ private:
+
+  ml_instance_definition mlid_;
+  ml_model_type type_;
+  ml_uint index_of_feature_to_predict_ = 0;
+  ml_uint k_ = 0;
+  ml_data training_data_;
+  bool validated_ = false;
+
+};
+
+
+} // namespace puml 
 
