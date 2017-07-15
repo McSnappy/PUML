@@ -1,7 +1,7 @@
 .PHONY = all debug mltest clean 
 
 CXX = /usr/bin/g++
-CXXFLAGS = -O2 -flto -Wall -Wshadow -std=c++11
+CXXFLAGS = -O2 -flto -Wall -std=c++11
 LDDFLAGS = -flto -lpumlbrent -lpthread
 
 UNAME_S := $(shell uname -s)
