@@ -18,10 +18,13 @@ class ml_model final {
 
   bool save(const ml_string &path) const { return(model_.save(path)); }
   bool restore(const ml_string &path) { return(model_.restore(path)); }
-  
+
+  using custom_cv_func = std::function<void (const T &cv_model, const ml_data &fold_test, ml_results &fold_results)>;
+
   template<typename U> 
   ml_crossvalidation_results<U> train(const ml_data &mld, ml_uint folds = 10, 
-				      ml_uint cvseed = ML_DEFAULT_SEED);
+				      ml_uint cvseed = ML_DEFAULT_SEED,
+				      custom_cv_func cv_func = nullptr);
 
   template<typename U>
   U evaluate(const ml_data &mld) const;

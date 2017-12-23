@@ -69,6 +69,7 @@ ml_double ml_regression_results::value_for_metric(ml_regression_metric metric) c
   case ml_regression_metric::mae: return(mae_metric()); break;
   case ml_regression_metric::rmse: return(rmse_metric()); break;
   case ml_regression_metric::rmsle: return(rmsle_metric()); break;
+  case ml_regression_metric::custom: return(custom_metric_); break;
   }
 
   return(0.0);
@@ -80,7 +81,10 @@ ml_string ml_regression_results::summary() const {
   desc += "\nInstances: " + std::to_string(instances_) + "\n";
   desc += "MAE: " + std::to_string(value_for_metric(ml_regression_metric::mae)) + "\n";
   desc += "RMSE: " + std::to_string(value_for_metric(ml_regression_metric::rmse)) + "\n";
-  desc += "RMSLE: " + std::to_string(value_for_metric(ml_regression_metric::rmsle)) + "\n";
+  //  desc += "RMSLE: " + std::to_string(value_for_metric(ml_regression_metric::rmsle)) + "\n";
+  if(custom_metric_use_) {
+    desc += custom_metric_desc_ + ": " + std::to_string(value_for_metric(ml_regression_metric::custom)) + "\n";
+  }
 
   return(desc);
 }
@@ -116,6 +120,7 @@ ml_double ml_classification_results::accuracy_metric() const {
 ml_double ml_classification_results::value_for_metric(ml_classification_metric metric) const {
   switch(metric) {
   case ml_classification_metric::accuracy: return(accuracy_metric()); break;
+  case ml_classification_metric::custom: return(custom_metric_); break;
   }
 
   return(0.0);
@@ -135,9 +140,13 @@ ml_string ml_classification_results::summary() const {
   }
 
   desc += "\nInstances: " + std::to_string(instances_) + "\n";
+  if(custom_metric_use_) {
+    desc += custom_metric_desc_ + ": " + std::to_string(value_for_metric(ml_classification_metric::custom)) + "\n";
+  }
   ml_float pct = value_for_metric(ml_classification_metric::accuracy);
   desc += string_format("Correctly Classified: %d (%.1f%%)\n\n",
 			instances_correctly_classified_, pct);
+
 
   // only show the confusion matrix for a reasonable number of categories
   if(mlid_[index_of_feature_to_predict_]->discrete_values.size() > 20) {

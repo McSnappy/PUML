@@ -8,8 +8,8 @@
 
 namespace puml {
 
-enum class ml_regression_metric  { mae, rmse, rmsle };
-enum class ml_classification_metric { accuracy };
+enum class ml_regression_metric  { mae, rmse, rmsle, custom };
+enum class ml_classification_metric { accuracy, custom };
 
 class ml_results {
  
@@ -25,6 +25,8 @@ public:
   void collect_results(const ml_vector<ml_feature_value> &predictions,
 		       const ml_data &mld);
 
+  void set_custom_metric(ml_double value) { custom_metric_use_ = true; custom_metric_ = value; }
+  void set_custom_metric_desc(const ml_string &desc) { custom_metric_desc_ = desc; }
 
  protected:
 
@@ -32,6 +34,9 @@ public:
   ml_uint instances_ = 0;
   ml_uint index_of_feature_to_predict_ = 0;
 
+  bool custom_metric_use_ = false;
+  ml_double custom_metric_ = 0.0;
+  ml_string custom_metric_desc_ = "CUSTOM";
 };
 
 

@@ -5,8 +5,10 @@ namespace puml {
 
 template<typename T>
 template<typename U> 
-ml_crossvalidation_results<U> ml_model<T>::train(const ml_data &mld, ml_uint folds,
-						 ml_uint cvseed) {
+ml_crossvalidation_results<U> ml_model<T>::train(const ml_data &mld, 
+			      			 ml_uint folds,
+						 ml_uint cvseed,
+				                 custom_cv_func cv_func) {
 
   ml_crossvalidation_results<U> cv_results;
 
@@ -28,7 +30,7 @@ ml_crossvalidation_results<U> ml_model<T>::train(const ml_data &mld, ml_uint fol
 
   for(ml_uint fold = 0; fold < folds; ++fold) {
 
-    log("%d fold cross-validation (fold %d)\n", folds, fold+1);
+    log("\n *** %d fold cross-validation (fold %d) *** \n", folds, fold+1);
 
     ml_uint test_offset = fold * test_size;
     ml_data test_fold = ml_data(mld_shuffle.begin() + test_offset, mld_shuffle.begin() + test_offset + test_size);
@@ -48,7 +50,11 @@ ml_crossvalidation_results<U> ml_model<T>::train(const ml_data &mld, ml_uint fol
 
     model_.train(training_fold);
     U fold_results = evaluate<U>(test_fold);
+    if(cv_func) {
+      cv_func(model_, test_fold, fold_results);
+    }
     cv_results.add_fold_result(fold_results);
+
   }
 
   return(cv_results);

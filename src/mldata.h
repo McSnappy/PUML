@@ -114,7 +114,7 @@ struct ml_feature_desc {
   // true: insert an out of range value for continuous features 
   // and use a separate category for discrete. This option is 
   // available from the instance defintion row, the first row, 
-  // of the data set. see loadInstanceDataFromFile() below
+  // of the data set. see load_data() below
   bool preserve_missing = false; 
 
   // continuous features
@@ -189,9 +189,9 @@ bool load_data(const ml_string &path_to_input_file, ml_instance_definition &mlid
 
 //
 // The internal category values for discrete features are defined based on the order that each
-// distinct category is found in the data when loaded with loadInstanceDataFromFile(). If you
+// distinct category is found in the data when loaded with load_data(). If you
 // wish to run a model built from training data on test data from a separate file you should
-// use loadInstanceDataFromFileUsingInstanceDefinition() to force the load of test data 
+// use load_data_using_instance_definition() to force the load of test data 
 // to use category definitions from the training data's ml_instance_definition.
 // 
 // returns true on success
