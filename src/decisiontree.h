@@ -85,11 +85,12 @@ class decision_tree final {
 		ml_uint features_to_consider_per_node=0, ml_uint seed=ML_DEFAULT_SEED,
 		bool keep_instances_at_leaf_nodes=false);
 
-  decision_tree(const ml_instance_definition &mlid, 
-		ml_uint index_of_feature_to_predict, 
-		ml_uint max_tree_depth, ml_uint min_leaf_instances, 
-		ml_uint features_to_consider_per_node=0, ml_uint seed=ML_DEFAULT_SEED,
-		bool keep_instances_at_leaf_nodes=false);
+   decision_tree(const ml_instance_definition &mlid,
+                ml_uint index_of_feature_to_predict,
+                ml_uint max_tree_depth, ml_uint min_leaf_instances,
+                ml_uint features_to_consider_per_node=0, ml_uint seed=ML_DEFAULT_SEED,
+                bool keep_instances_at_leaf_nodes=false);
+ 
 
   //
   // A tree within an ensemble (random_forest, boosted_trees) writes

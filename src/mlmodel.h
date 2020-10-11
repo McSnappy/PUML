@@ -4,6 +4,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <functional>
 
 #include "mldata.h"
 #include "mlresults.h"

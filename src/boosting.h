@@ -23,6 +23,7 @@ SOFTWARE.
 #pragma once
 
 #include "decisiontree.h"
+#include <functional>
 
 namespace puml {
 

@@ -5,6 +5,7 @@
 #include "mlutil.h"
 
 #include <algorithm>
+#include <functional>
 
 namespace puml {
 
