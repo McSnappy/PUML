@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2016 Carl Sherrell
+Copyright (c) Carl Sherrell
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -31,7 +31,9 @@ SOFTWARE.
 #include <vector>
 
 #include "logging.h"
-#include "cJSON/cJSON.h"
+
+#include "json.hpp"
+using json = nlohmann::json;
 
 namespace puml {
 
@@ -57,6 +59,7 @@ enum class ml_model_type : ml_uint {
   regression
 };
 
+extern const ml_string ML_VERSION_STRING;
 extern const ml_float ML_VERSION; 
 extern const ml_float MISSING_CONTINUOUS_FEATURE_VALUE;
 extern const ml_uint ML_DEFAULT_SEED;
@@ -240,10 +243,6 @@ bool write_instance_definition_to_file(const ml_string &path_to_file,
 				       const ml_instance_definition &mlid);
 bool read_instance_definition_from_file(const ml_string &path_to_file, 
 					ml_instance_definition &mlid);
-
-bool write_model_json_to_file(const ml_string &path_to_file, 
-			      cJSON *json_object);
-cJSON *read_model_json_from_file(const ml_string &path_to_file);
 
 extern const ml_string ML_UNKNOWN_DISCRETE_CATEGORY;
 

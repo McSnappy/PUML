@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2016 Carl Sherrell
+Copyright (c) Carl Sherrell
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -98,66 +98,79 @@ bool read_decision_trees_from_directory(const ml_string &path_to_dir,
 }
 
 
-static cJSON *get_number_item_from_json(cJSON *json_object, const ml_string &name) {
-  cJSON *item = cJSON_GetObjectItem(json_object, name.c_str());
-  if(!item || (item->type != cJSON_Number)) {
-    log_error("json is missing %s\n", name.c_str());
-    return(nullptr);
-  }
-
-  return(item);
-}
-
-
-bool get_numeric_value_from_json(cJSON *json_object, const ml_string &name, ml_uint &value) {
-  cJSON *item = get_number_item_from_json(json_object, name);
-  if(!item) {
+bool get_numeric_value_from_json(const json &json_object, const ml_string &name, ml_uint &value) {
+  
+  ml_string name_kludge(name); // for some reason json::contains only takes a non-const rvalue
+  if(!json_object.contains<ml_string>(std::move(name_kludge))) {
     return(false);
   }
-  value = item->valueint;
+
+  const json &val = json_object[name];
+  if(val.is_number() || val.is_boolean()) {
+    value = (ml_uint) val;
+  }
+  else if(val.is_string()) {
+    value = std::stoi((const ml_string &) val);
+  }
+  else {
+    log_error("error while unpacking value for key: %s\n", name.c_str());
+    return(false);
+  }
+  
   return(true);
 }
 
 
-bool get_double_value_from_json(cJSON *json_object, const ml_string &name, ml_double &value) {
-  cJSON *item = get_number_item_from_json(json_object, name);
-  if(!item) {
+bool get_double_value_from_json(const json &json_object, const ml_string &name, ml_double &value) {
+    
+  ml_string name_kludge(name); // for some reason json::contains only takes a non-const rvalue
+  if(!json_object.contains<ml_string>(std::move(name_kludge))) {
     return(false);
   }
-  value = item->valuedouble;
+
+  const json &val = json_object[name];
+  if(val.is_number()) {
+    value = (ml_double) val;
+  }
+  else if(val.is_string()) {
+    value = std::stod((const ml_string &) val);
+  }
+  else {
+    log_error("error while unpacking value for key: %s\n", name.c_str());
+    return(false);
+  }
+    
   return(true);
 }
 
 
-bool get_float_value_from_json(cJSON *json_object, const ml_string &name, ml_float &value) {
+bool get_float_value_from_json(const json &json_object, const ml_string &name, ml_float &value) {
+  
   ml_double dbl_value=0;
-  get_double_value_from_json(json_object, name, dbl_value);
+  bool status = get_double_value_from_json(json_object, name, dbl_value);
   value = dbl_value;
-  return(true);
+  
+  return(status);
 }
 
 
-bool get_bool_value_from_json(cJSON *json_object, const ml_string &name, bool &value) {
+bool get_bool_value_from_json(const json &json_object, const ml_string &name, bool &value) {
+  
   ml_uint value_as_int = 0;
-  if(!get_numeric_value_from_json(json_object, name, value_as_int)) {
-    return(false);
-  }
-
+  bool status = get_numeric_value_from_json(json_object, name, value_as_int);
   value = (value_as_int != 0) ? true : false;
 
-  return(true);
+  return(status);
 }
 
 
-bool get_modeltype_value_from_json(cJSON *json_object, const ml_string &name, ml_model_type &value) {
+bool get_modeltype_value_from_json(const json &json_object, const ml_string &name, ml_model_type &value) {
+
   ml_uint value_as_int = 0;
-  if(!get_numeric_value_from_json(json_object, name, value_as_int)) {
-    return(false);
-  }
+  bool status = get_numeric_value_from_json(json_object, name, value_as_int);
+  value = (ml_model_type) value_as_int;
 
-  value = (ml_model_type)value_as_int;
-
-  return(true);
+  return(status);
 }
 
 } // namespace puml

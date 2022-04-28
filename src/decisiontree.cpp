@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2016 Carl Sherrell
+Copyright (c) Carl Sherrell
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -20,6 +20,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
+#include <fstream>
 #include <algorithm>
 #include <chrono>
 #include <limits>
@@ -736,82 +737,42 @@ ml_feature_value decision_tree::evaluate(const ml_instance &instance) const {
 }
 
   
-static cJSON *add_nodes_to_json_object(const dt_node &node, cJSON *json_nodes, ml_uint &node_id) {
+void add_nodes_to_json_object(const dt_node &node, json &json_nodes, ml_uint &node_id) {
 
-  cJSON *json_node = cJSON_CreateObject();
-  cJSON_AddNumberToObject(json_node, "id", node_id);
-  cJSON_AddNumberToObject(json_node, "nt", (double) node.node_type);
-  cJSON_AddNumberToObject(json_node, "fi", node.feature_index);
-  cJSON_AddNumberToObject(json_node, "ft", (double) node.feature_type);
-  cJSON_AddNumberToObject(json_node, "fv", 
-			  (node.feature_type == ml_feature_type::continuous) ? node.feature_value.continuous_value : node.feature_value.discrete_value_index);
-
-  //
-  // we don't use cJSON_AddItemToArray(json_nodes, json_node) here for performance reasons
-  //
-  if(node_id == 0) { // root node
-    json_nodes->child = json_node;
-  }
-  else {
-    json_nodes->next = json_node;
-    json_node->prev = json_nodes;
-  }
+  json anode = {{"id", node_id},
+		{"nt", (double) node.node_type},
+		{"fi", node.feature_index},
+		{"ft", (double) node.feature_type},
+		{"fv", (node.feature_type == ml_feature_type::continuous) ? node.feature_value.continuous_value : node.feature_value.discrete_value_index}};
   
-  json_nodes = json_node;
-
   if(node.split_left_node) {
     ml_uint left_node_id = ++node_id;
-    cJSON_AddNumberToObject(json_node, "lid", left_node_id);
-    cJSON_AddNumberToObject(json_node, "lop", (double)node.split_left_op);
-    json_nodes = add_nodes_to_json_object(*node.split_left_node, json_nodes, node_id); 
+    anode["lid"] = left_node_id;
+    anode["lop"] = (ml_uint) node.split_left_op;
+    add_nodes_to_json_object(*node.split_left_node, json_nodes, node_id); 
   }
 
   if(node.split_right_node) {
     ml_uint right_node_id = ++node_id;
-    cJSON_AddNumberToObject(json_node, "rid", right_node_id);
-    cJSON_AddNumberToObject(json_node, "rop", (double)node.split_right_op);
-    json_nodes = add_nodes_to_json_object(*node.split_right_node, json_nodes, node_id);
+    anode["rid"] = right_node_id;
+    anode["rop"] = (ml_uint) node.split_right_op;
+    add_nodes_to_json_object(*node.split_right_node, json_nodes, node_id);
   }
 
-  return(json_nodes);
+  json_nodes.push_back(anode);
+
 }
 
 
-static bool validateTreeNodeJSONObject(cJSON *json_node) {
-  if(!cJSON_GetObjectItem(json_node, "nt") ||
-     !cJSON_GetObjectItem(json_node, "fi") ||
-     !cJSON_GetObjectItem(json_node, "ft") ||
-     !cJSON_GetObjectItem(json_node, "fv")) {
-    return(false);
-  }
-  
-  dt_node_type node_type = (dt_node_type) cJSON_GetObjectItem(json_node, "nt")->valueint;
-  if(node_type == dt_node_type::split) {
-    if(!cJSON_GetObjectItem(json_node, "lop") ||
-       !cJSON_GetObjectItem(json_node, "lid") ||
-       !cJSON_GetObjectItem(json_node, "rop") ||
-       !cJSON_GetObjectItem(json_node, "rid")) {
-      return(false);
-    }
-  }
+static bool create_tree_node_from_json(dt_node_ptr &node, ml_uint node_id, ml_map<ml_uint, json> &nodes_map, ml_uint &nodes, ml_uint &leaves) {
 
-  return(true);
-}
-
-
-static bool create_tree_node_from_json(dt_node_ptr &node, ml_uint node_id, ml_map<ml_uint, cJSON *> &nodes_map, ml_uint &nodes, ml_uint &leaves) {
-
-  cJSON *json_node = (nodes_map.find(node_id) != nodes_map.end()) ? nodes_map[node_id] : nullptr;
-  if(!json_node) {
+  if(nodes_map.find(node_id) == nodes_map.end()) {
     log_error("can't find node in json with node_id of %d\n", node_id);
     return(false);
   }
 
-  if(!validateTreeNodeJSONObject(json_node)) {
-    log_error("invalid or incomplete node json. node id: %u\n", node_id);
-    return(false);
-  }
-
+  const json &json_node = nodes_map[node_id];
+  
   node = std::make_shared<dt_node>();
   if(!node) {
     log_error("out of memory...\n");
@@ -820,25 +781,40 @@ static bool create_tree_node_from_json(dt_node_ptr &node, ml_uint node_id, ml_ma
 
   nodes += 1;
 
-  node->node_type = (dt_node_type) cJSON_GetObjectItem(json_node, "nt")->valueint;
-  node->feature_index = cJSON_GetObjectItem(json_node, "fi")->valueint;
-  node->feature_type = (ml_feature_type) cJSON_GetObjectItem(json_node, "ft")->valueint;
+  ml_uint node_type=0, feature_index=0, feature_type=0;
+  if(!get_numeric_value_from_json(json_node, "nt", node_type) ||
+     !get_numeric_value_from_json(json_node, "fi", feature_index) ||
+     !get_numeric_value_from_json(json_node, "ft", feature_type)) {
+    log_error("invalid or incomplete node json. node id: %u\n", node_id);
+    return(false);
+  }
+     
+  node->node_type = (dt_node_type) node_type;
+  node->feature_type = (ml_feature_type) feature_type;
+  node->feature_index = feature_index;
   if(node->feature_type == ml_feature_type::continuous) {
-    node->feature_value.continuous_value = cJSON_GetObjectItem(json_node, "fv")->valuedouble;
+    get_float_value_from_json(json_node, "fv", node->feature_value.continuous_value);
   }
   else {
-    node->feature_value.discrete_value_index = cJSON_GetObjectItem(json_node, "fv")->valueint;
+    get_numeric_value_from_json(json_node, "fv", node->feature_value.discrete_value_index);
   }
 
   if(node->node_type == dt_node_type::leaf) {
     leaves += 1;
   }
   else {
-    node->split_left_op = (dt_comparison_op) cJSON_GetObjectItem(json_node, "lop")->valueint;
-    ml_uint left_node_id = cJSON_GetObjectItem(json_node, "lid")->valueint;
 
-    node->split_right_op = (dt_comparison_op) cJSON_GetObjectItem(json_node, "rop")->valueint;
-    ml_uint right_node_id = cJSON_GetObjectItem(json_node, "rid")->valueint;
+    ml_uint left_node_id=0, left_node_op=0, right_node_id=0, right_node_op=0;
+    if(!get_numeric_value_from_json(json_node, "lid", left_node_id) ||
+       !get_numeric_value_from_json(json_node, "lop", left_node_op) ||
+       !get_numeric_value_from_json(json_node, "rid", right_node_id) ||
+       !get_numeric_value_from_json(json_node, "rop", right_node_op)) {
+      log_error("incomplete node json. node id: %u\n", node_id);
+      return(false);
+    }
+
+    node->split_left_op = (dt_comparison_op) left_node_op;
+    node->split_right_op = (dt_comparison_op) right_node_op;
 
     if(!create_tree_node_from_json(node->split_left_node, left_node_id, nodes_map, nodes, leaves) ||
        !create_tree_node_from_json(node->split_right_node, right_node_id, nodes_map, nodes, leaves)) {
@@ -851,14 +827,14 @@ static bool create_tree_node_from_json(dt_node_ptr &node, ml_uint node_id, ml_ma
 }
 
 
-bool decision_tree::create_decision_tree_from_json(cJSON *json_object) {
+bool decision_tree::create_decision_tree_from_json(const json &json_object) {
 
-  if(!json_object) {
+  if(json_object.empty()) {
     return(false);
   }
 
-  cJSON *object = cJSON_GetObjectItem(json_object, "object");
-  if(!object || !object->valuestring || strcmp(object->valuestring, "decision_tree")) {
+  ml_string object_name = json_object["object"];
+  if(object_name != "decision_tree") {
     log_error("tree json is malformed...\n");
     return(false);
   }
@@ -873,28 +849,23 @@ bool decision_tree::create_decision_tree_from_json(cJSON *json_object) {
     return(false);
   }
 
-  cJSON *nodes_array = cJSON_GetObjectItem(json_object, "nodes");
-  if(!nodes_array || (nodes_array->type != cJSON_Array)) {
+  if(!json_object.contains<ml_string>("nodes")) {
     log_error("json object is missing a nodes array\n");
     return(false);
   }
 
-  ml_map<ml_uint, cJSON *> nodes_map;
-  cJSON *node = nodes_array->child;;
-  while(node) {
-    if(!node || (node->type != cJSON_Object)) {
-      log_error("tree json has bogus node in nodes array\n");
-      return(false);
-    }
-    
-    cJSON *node_id = cJSON_GetObjectItem(node, "id");
-    if(!node_id || (node_id->type != cJSON_Number)) {
-      log_error("tree json has node with bogus node_id");
+  json nodes_array = json_object["nodes"];
+  
+  ml_map<ml_uint, json> nodes_map;
+  for(const json &json_node : nodes_array) {
+
+    ml_uint node_id = 0;
+    if(!get_numeric_value_from_json(json_node, "id", node_id)) {
+      log_error("tree json has node with missing node_id\n");
       return(false);
     }
 
-    nodes_map[node_id->valueint] = node;
-    node = node->next;
+    nodes_map[node_id] = json_node;
   }
 
   if(nodes_map.empty()) {
@@ -917,50 +888,44 @@ bool decision_tree::save(const ml_string &path, bool part_of_ensemble) const {
     return(false);
   }
 
-  cJSON *json_tree = cJSON_CreateObject();
-  if(!json_tree) {
-    log_error("couldn't create json object for tree\n");
-    return(false);
-  }
-
-  cJSON_AddStringToObject(json_tree, "object", "decision_tree");
-  cJSON_AddNumberToObject(json_tree, "type", (double)type_);
-  cJSON_AddNumberToObject(json_tree, "index_of_feature_to_predict", index_of_feature_to_predict_);
-  cJSON_AddNumberToObject(json_tree, "max_tree_depth", max_tree_depth_);
-  cJSON_AddNumberToObject(json_tree, "min_leaf_instances", min_leaf_instances_);
-  cJSON_AddNumberToObject(json_tree, "features_to_consider_per_node", features_to_consider_per_node_);
-  cJSON_AddNumberToObject(json_tree, "seed", seed_);
-  cJSON_AddNumberToObject(json_tree, "keep_instances_at_leaf_nodes", keep_instances_at_leaf_nodes_);
-
-  cJSON *json_nodes = cJSON_CreateArray();
-  cJSON_AddItemToObject(json_tree, "nodes", json_nodes);
-
   ml_uint node_id = 0;
+  json json_nodes = json::array();
   add_nodes_to_json_object(*root_, json_nodes, node_id);
+  
+  json json_tree = {
+    {"version", ML_VERSION_STRING},
+    {"object", "decision_tree"},
+    {"type", (double)type_},
+    {"index_of_feature_to_predict", index_of_feature_to_predict_},
+    {"max_tree_depth", max_tree_depth_},
+    {"min_leaf_instances", min_leaf_instances_},
+    {"features_to_consider_per_node", features_to_consider_per_node_},
+    {"seed", seed_},
+    {"keep_instances_at_leaf_nodes", keep_instances_at_leaf_nodes_},
+    {"nodes", json_nodes}
+  };
 
-  bool status = false;
   if(part_of_ensemble) {
     //
-    // a tree within an ensemble (random_forest, boosted_trees) writes
+    // a tree within an ensemble (random_forest) writes
     // just its tree json without the mlid, which is written by the 
     // ensemble model.
     //
-    status = write_model_json_to_file(path, json_tree);
+    std::ofstream modelout(path);
+    modelout << json_tree << std::endl; 
   }
   else {
     //
     // a single tree has its own directory with tree json and mlid json
     //
-    if(prepare_directory_for_model_save(path) &&
-       write_model_json_to_file(path + "/" + DT_TREE_JSONFILE, json_tree) &&
-       write_instance_definition_to_file(path + "/" + DT_MLID_JSONFILE, mlid_)) {
-      status = true;
+    if(prepare_directory_for_model_save(path)) {
+      std::ofstream modelout(path + "/" + DT_TREE_JSONFILE);
+      modelout << json_tree << std::endl; 
+      write_instance_definition_to_file(path + "/" + DT_MLID_JSONFILE, mlid_);
     }
   }
 
-  cJSON_Delete(json_tree);
-
-  return(status);
+  return(true);
 }
 
 
@@ -975,19 +940,17 @@ bool decision_tree::restore(const ml_string &path) {
 
 
 bool decision_tree::restore(const ml_string &path, const ml_instance_definition &mlid) {
-  cJSON *json_object = read_model_json_from_file(path);
-  if(!json_object) {
-    log_error("couldn't load decision tree json object from model file: %s\n", path.c_str());
-    return(false);
-  }
+
+  std::ifstream jsonfile(path);
+  json json_object;
+  jsonfile >> json_object;
 
   mlid_ = mlid;
   root_ = nullptr;
   leaves_ = nodes_ = 0;
   feature_importance_.clear();
   bool status = create_decision_tree_from_json(json_object);
-  cJSON_Delete(json_object);
-
+  
   return(status);  
 }
 

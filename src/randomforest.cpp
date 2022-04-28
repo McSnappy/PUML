@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2016 Carl Sherrell
+Copyright (c) Carl Sherrell
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -21,6 +21,7 @@ SOFTWARE.
 */
 
 #include <sstream>
+#include <fstream>
 #include <iomanip>
 #include <algorithm>
 #include <thread>
@@ -392,27 +393,21 @@ ml_feature_value random_forest::evaluate(const ml_instance &instance) const {
 
 bool random_forest::write_random_forest_base_info_to_file(const ml_string &path) const {
 
-  cJSON *json_object = cJSON_CreateObject();
-  if(!json_object) {
-    log_error("couldn't create json object from random forest\n");
-    return(false);
-  }
+  json json_object = {{"object", "random_forest"},
+		      {"version", ML_VERSION_STRING},
+		      {"type", type_},
+		      {"index_of_feature_to_predict", index_of_feature_to_predict_},
+		      {"number_of_trees", number_of_trees_},
+		      {"seed", seed_},
+		      {"number_of_threads", number_of_threads_},
+		      {"max_tree_depth", max_tree_depth_},
+		      {"min_leaf_instances", min_leaf_instances_},
+		      {"features_to_consider_per_node", features_to_consider_per_node_},
+		      {"evaluate_oob", evaluate_oob_}};
 
-  cJSON_AddStringToObject(json_object, "object", "random_forest");
-  cJSON_AddNumberToObject(json_object, "type", (double)type_);
-  cJSON_AddNumberToObject(json_object, "index_of_feature_to_predict", index_of_feature_to_predict_);
-  cJSON_AddNumberToObject(json_object, "number_of_trees", number_of_trees_);
-  cJSON_AddNumberToObject(json_object, "seed", seed_);
-  cJSON_AddNumberToObject(json_object, "number_of_threads", number_of_threads_);
-  cJSON_AddNumberToObject(json_object, "max_tree_depth", max_tree_depth_);
-  cJSON_AddNumberToObject(json_object, "min_leaf_instances", min_leaf_instances_);
-  cJSON_AddNumberToObject(json_object, "features_to_consider_per_node", features_to_consider_per_node_);
-  cJSON_AddNumberToObject(json_object, "evaluate_oob", evaluate_oob_);
-
-  bool status = write_model_json_to_file(path, json_object);
-  cJSON_Delete(json_object);
-
-  return(status);
+  std::ofstream modelout(path);
+  modelout << std::setw(4) << json_object << std::endl; 
+  return(true);
 }
 
 
@@ -457,14 +452,13 @@ bool random_forest::save(const ml_string &path) const {
 
 
 bool random_forest::read_random_forest_base_info_from_file(const ml_string &path) {
-  cJSON *json_object = read_model_json_from_file(path);
-  if(!json_object) {
-    log_error("couldn't load random forest json object from model file: %s\n", path.c_str());
-    return(false);
-  }
 
-  cJSON *object = cJSON_GetObjectItem(json_object, "object");
-  if(!object || !object->valuestring || strcmp(object->valuestring, "random_forest")) {
+  std::ifstream jsonfile(path);
+  json json_object;
+  jsonfile >> json_object;
+
+  ml_string object_name = json_object["object"];
+  if(object_name != "random_forest") {
     log_error("json object is not a random forest...\n");
     return(false);
   }
@@ -480,8 +474,6 @@ bool random_forest::read_random_forest_base_info_from_file(const ml_string &path
        get_bool_value_from_json(json_object, "evaluate_oob", evaluate_oob_))) {
     return(false);
   }
-
-  cJSON_Delete(json_object);
 
   return(true);
 }

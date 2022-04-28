@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2016 Carl Sherrell
+Copyright (c) Carl Sherrell
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -21,11 +21,10 @@ SOFTWARE.
 */
 
 #include "mldata.h"
+#include "mlutil.h"
+#include "rapidcsv.h"
 
 #include <iostream>
-#include <istream>
-#include <fstream>
-#include <sstream>
 #include <algorithm>
 #include <limits>
 #include <string>
@@ -34,12 +33,15 @@ SOFTWARE.
 #include <math.h>
 #include <string.h>
 
+
+
 namespace puml {
 
-const ml_float ML_VERSION = 0.1; 
+const ml_string ML_VERSION_STRING = "0.2";
+const ml_float ML_VERSION = 1.0; 
 const ml_string ML_UNKNOWN_DISCRETE_CATEGORY = "<unknown>";
 const ml_float MISSING_CONTINUOUS_FEATURE_VALUE = std::numeric_limits<ml_float>::lowest();
-const ml_uint ML_DEFAULT_SEED = 42;
+const ml_uint ML_DEFAULT_SEED = 999;
 
 //
 // one per feature, used for online avg/variance calc 
@@ -65,28 +67,6 @@ static ml_string stringTrimLeadingTrailingWhitespace(ml_string &str) {
   return(str.substr(first, (last-first+1)));
 }
 
-
-static bool parseInstanceDataLine(const ml_string &instance_line, ml_vector<ml_string> &features_as_string) {
-
-  const char ML_DATA_DELIM = ',';
-
-  features_as_string.clear();
-
-  if(instance_line == "") {
-    return(false);
-  }
-  
-  std::stringstream ss(instance_line);
-
-  while(ss.good()) {
-    ml_string feature_as_string;
-    std::getline(ss, feature_as_string, ML_DATA_DELIM);
-    feature_as_string = stringTrimLeadingTrailingWhitespace(feature_as_string);
-    features_as_string.push_back(feature_as_string);
-  }
-  
-  return(features_as_string.size() > 0);
-}
 
 static bool initInstanceDefinition(ml_instance_definition &mlid, const ml_vector<ml_string> &features_as_string, 
 				   ml_vector<ml_stats_helper> &stats_helper, ml_map<ml_uint, bool> &ignored_features) {
@@ -346,8 +326,9 @@ static bool loadInstanceDataFromFile(const ml_string &path_to_input_file, ml_ins
   mld.clear();
   bool mlid_preloaded = mlid.empty() ? false : true;
 
-  std::ifstream input_file(path_to_input_file);
-  if(!input_file) {
+  rapidcsv::Document doc(path_to_input_file, rapidcsv::LabelParams(-1, -1)); 
+  int row_count = doc.GetRowCount();
+  if(row_count <= 0) {
     log_error("can't open input file %s\n", path_to_input_file.c_str());
     return(false);
   }
@@ -355,14 +336,10 @@ static bool loadInstanceDataFromFile(const ml_string &path_to_input_file, ml_ins
   ml_vector<ml_stats_helper> stats_helper;
   ml_map<ml_uint, bool> ignored_features;
 
-  ml_string line;
-  while(std::getline(input_file, line)) {
+  for(int row_idx = 0; row_idx < row_count; ++row_idx) {
 
-    // 
-    // Parse each column into a vector of strings
-    //
-    ml_vector<ml_string> features_as_string;
-    if(!parseInstanceDataLine(line, features_as_string)) {
+    ml_vector<ml_string> features_as_string = doc.GetRow<ml_string>(row_idx);
+    if(features_as_string.empty() || (features_as_string.size() == 1)) { // empty line
       continue;
     }
 
@@ -373,7 +350,7 @@ static bool loadInstanceDataFromFile(const ml_string &path_to_input_file, ml_ins
       //
       ml_instance_definition mlid_temp;
       if(!initInstanceDefinition(mlid_temp, features_as_string, stats_helper, ignored_features)) {
-	log_error("confused by instance definition line:%s\n", line.c_str());
+	log_error("confused by instance definition line:%d\n", row_idx);
 	return(false);
       }
 
@@ -391,7 +368,7 @@ static bool loadInstanceDataFromFile(const ml_string &path_to_input_file, ml_ins
       // Update stats for each feature, add the instance to ml_data, etc
       //
       if(!processInstanceFeatures(mlid, mld, features_as_string, stats_helper, ignored_features)) {
-	log_error("confused by instance row:%s\n", line.c_str());
+	log_error("confused by instance row:%d\n", row_idx);
 	return(false);
       }
 
@@ -405,7 +382,6 @@ static bool loadInstanceDataFromFile(const ml_string &path_to_input_file, ml_ins
 
   }
   
-  input_file.close();
   
   if(!mlid_preloaded) {
     calcMeanOrModeOfFeatures(mlid, mld, stats_helper);
@@ -483,204 +459,127 @@ void split_data_into_training_and_test(ml_data &mld, ml_float training_factor,
   test = ml_data(mld.begin(), mld.end());
 }
 
-bool write_model_json_to_file(const ml_string &path_to_file, 
-			      cJSON *json_object) {
 
-  if(!json_object) {
-    log_error("nil json object...\n");
-    return(false);
-  }
+static void fillJSONObjectFromInstanceDefinition(json &json_mlid, const ml_instance_definition &mlid) {
 
-  cJSON_AddNumberToObject(json_object, "version", ML_VERSION);
+  json_mlid["object"] = "ml_instance_definition";
+  json_mlid["version"] = ML_VERSION_STRING;
   
-  //char *json_str = cJSON_Print(json_object);
-  char *json_str = cJSON_PrintUnformatted(json_object);
-  if(!json_str) {
-    log_error("failed to convert json object to string...\n");
-    return(false);
-  }
-
-  FILE *fp = fopen(path_to_file.c_str(), "w");
-  if(!fp) {
-    log_error("couldn't create model file: %s\n", path_to_file.c_str());
-    free(json_str);
-    return(false);
-  }
-
-  fprintf(fp, "%s\n", json_str);
-  fclose(fp);
-  free(json_str);
-
-  return(true);
-}
-
-cJSON *read_model_json_from_file(const ml_string &path_to_file) {
-  FILE *fp = fopen(path_to_file.c_str(), "r");
-  if(!fp) {
-    log_error("couldn't open model file: %s\n", path_to_file.c_str());
-    return(nullptr);
-  }
-
-  fseek(fp, 0, SEEK_END);
-  long len = ftell(fp);
-  fseek(fp,0,SEEK_SET);
-
-  if(len == 0) {
-    log_error("model file is empty: %s\n", path_to_file.c_str());
-    return(nullptr);
-  }
-
-  char *json_str = (char *) malloc(len+1);
-  if(!json_str) {
-    log_error("out of memory...\n");
-    return(nullptr);
-  }
-
-  if(!fread(json_str, 1, len, fp)) {
-    log_error("failed to read model json: %s\n", path_to_file.c_str());
-    return(nullptr);
-  }
-
-  fclose(fp);
-
-  cJSON *json_obj = cJSON_Parse(json_str);
-  if(!json_obj) {
-    log_error("failed to parse model json: %s\n", path_to_file.c_str());
-  }
-
-  free(json_str);
-
-  return(json_obj);
-}
-
-static cJSON *createJSONObjectFromInstanceDefinition(const ml_instance_definition &mlid) {
-
-  cJSON *json_mlid = cJSON_CreateObject();
-  cJSON_AddStringToObject(json_mlid, "object", "ml_instance_definition");
-
-  cJSON *json_fdescs = cJSON_CreateArray();
-  cJSON_AddItemToObject(json_mlid, "fdesc_array", json_fdescs);
-
+  json json_fdescs = json::array();
   for(std::size_t ii =0; ii < mlid.size(); ++ii) {
-    cJSON *json_feature_desc = cJSON_CreateObject();
-    cJSON_AddStringToObject(json_feature_desc, "name", mlid[ii]->name.c_str());
-    cJSON_AddNumberToObject(json_feature_desc, "type", (double) mlid[ii]->type);
-    cJSON_AddNumberToObject(json_feature_desc, "missing", mlid[ii]->missing);
-    cJSON_AddNumberToObject(json_feature_desc, "preserve_missing", (mlid[ii]->preserve_missing ? 1 : 0));
+    json json_feature_desc;
+    json_feature_desc["name"] = mlid[ii]->name;
+    json_feature_desc["type"] = mlid[ii]->type;
+    json_feature_desc["missing"] = mlid[ii]->missing;
+    json_feature_desc["preserve_missing"] = mlid[ii]->preserve_missing;
     
     if(mlid[ii]->type == ml_feature_type::continuous) {
-      cJSON_AddNumberToObject(json_feature_desc, "mean", mlid[ii]->mean);
-      cJSON_AddNumberToObject(json_feature_desc, "sd", mlid[ii]->sd);
+      json_feature_desc["mean"] = mlid[ii]->mean;
+      json_feature_desc["sd"] = mlid[ii]->sd;
     }
     else {
-      cJSON_AddNumberToObject(json_feature_desc, "discrete_mode_index", mlid[ii]->discrete_mode_index);
+      json_feature_desc["discrete_mode_index"] = mlid[ii]->discrete_mode_index;
 
-      cJSON *json_values_array = cJSON_CreateArray();
-      cJSON_AddItemToObject(json_feature_desc, "discrete_values", json_values_array);
+      json json_values_array = json::array();
       for(std::size_t jj = 0; jj < mlid[ii]->discrete_values.size(); ++jj) {
-	cJSON_AddItemToArray(json_values_array, cJSON_CreateString(mlid[ii]->discrete_values[jj].c_str()));
+	json_values_array.push_back(mlid[ii]->discrete_values[jj]);
       }
+      json_feature_desc["discrete_values"] = json_values_array;
       
-      cJSON *json_values_count_array = cJSON_CreateArray();
-      cJSON_AddItemToObject(json_feature_desc, "discrete_values_count", json_values_count_array);
+      json json_values_count_array = json::array();
       for(std::size_t jj = 0; jj < mlid[ii]->discrete_values_count.size(); ++jj) {
-	cJSON_AddItemToArray(json_values_count_array, cJSON_CreateNumber(mlid[ii]->discrete_values_count[jj]));
+	json_values_count_array.push_back(mlid[ii]->discrete_values_count[jj]);
       }
+      json_feature_desc["discrete_values_count"] = json_values_count_array;
+      
     }
 
-    cJSON_AddItemToArray(json_fdescs, json_feature_desc);
+    json_fdescs.push_back(json_feature_desc);
   }
 
-
-  return(json_mlid);
+  json_mlid["fdesc_array"] = json_fdescs;
+  
 }
 
-static bool validateJSONFeatureDesc(cJSON *fdesc) {
 
-  if(!cJSON_GetObjectItem(fdesc, "name") ||
-     !cJSON_GetObjectItem(fdesc, "type") ||
-     !cJSON_GetObjectItem(fdesc, "missing") ||
-     !cJSON_GetObjectItem(fdesc, "preserve_missing")) {
+static bool createInstanceDefinitionFromJSONObject(const json &json_object, ml_instance_definition &mlid) {
+
+  if(json_object.empty()) {
     return(false);
   }
-
-  ml_feature_type type = (ml_feature_type) cJSON_GetObjectItem(fdesc, "type")->valueint;
-  if(type == ml_feature_type::continuous) {
-    if(!cJSON_GetObjectItem(fdesc, "mean") ||
-       !cJSON_GetObjectItem(fdesc, "sd")) {
-      return(false);
-    }
-  }
-  else {
-    if(!cJSON_GetObjectItem(fdesc, "discrete_mode_index") ||
-       !cJSON_GetObjectItem(fdesc, "discrete_values") ||
-       !cJSON_GetObjectItem(fdesc, "discrete_values_count")) {
-      return(false);
-    }
-  }
-
-  return(true);
-}
-
-static bool createInstanceDefinitionFromJSONObject(cJSON *json_object, ml_instance_definition &mlid) {
-
-  if(!json_object) {
-    log_error("nil json object...\n");
-    return(false);
-  }
-
-  cJSON *object = cJSON_GetObjectItem(json_object, "object");
-  if(!object || !object->valuestring || strcmp(object->valuestring, "ml_instance_definition")) {
+  
+  ml_string object_name = json_object["object"];
+  if(object_name != "ml_instance_definition") {
     log_error("json object is not an instance definition...\n");
     return(false);
   }
 
-  cJSON *fdesc_array = cJSON_GetObjectItem(json_object, "fdesc_array");
-  if(!fdesc_array || (fdesc_array->type != cJSON_Array)) {
+  const json &fdesc_array = json_object["fdesc_array"];
+  if(!fdesc_array.is_array() || (fdesc_array.size() == 0)) {
     log_error("json object is missing a fdsec array\n");
     return(false);
   }
 
-  int fdesc_count = cJSON_GetArraySize(fdesc_array);
-  if(fdesc_count <= 0) {
-    log_error("json object has empty fdesc array\n");
-    return(false);
-  }
-
-  for(int ii=0; ii < fdesc_count; ++ii) {
-    cJSON *fdesc = cJSON_GetArrayItem(fdesc_array, ii);
-    if(!fdesc || (fdesc->type != cJSON_Object)) {
-      log_error("json object has bogus fdesc in fdesc array\n");
-      return(false);
-    }
-
-    if(!validateJSONFeatureDesc(fdesc)) {
-      log_error("json object has missing/invalid fdesc attributes: index %d\n", ii);
-      return(false);
-    }
+  for(const json &fdesc : fdesc_array) {
 
     ml_feature_desc_ptr mlfd = std::make_shared<ml_feature_desc>();
-    mlfd->name = cJSON_GetObjectItem(fdesc, "name")->valuestring;
-    mlfd->type = (ml_feature_type) cJSON_GetObjectItem(fdesc, "type")->valueint;
-    mlfd->missing = cJSON_GetObjectItem(fdesc, "missing")->valueint;
-    mlfd->preserve_missing = (cJSON_GetObjectItem(fdesc, "missing")->valueint > 0) ? true : false;
+
+    ml_uint fdesc_type=0, fdesc_missing=0;
+    bool fdesc_preserve_missing=false;
+    if(!fdesc.contains<ml_string>("name") ||
+       !fdesc["name"].is_string() ||
+       !get_numeric_value_from_json(fdesc, "type", fdesc_type) ||
+       !get_numeric_value_from_json(fdesc, "missing", fdesc_missing) ||
+       !get_bool_value_from_json(fdesc, "preserve_missing", fdesc_preserve_missing)) {
+      log_error("malformed instance definition\n");
+      return(false);
+    }
+				 
+    mlfd->name = fdesc["name"];
+    mlfd->type = (ml_feature_type) fdesc_type;
+    mlfd->missing = fdesc_missing;
+    mlfd->preserve_missing = fdesc_preserve_missing;
     
     if(mlfd->type == ml_feature_type::continuous) {
-      mlfd->mean = cJSON_GetObjectItem(fdesc, "mean")->valuedouble;
-      mlfd->sd = cJSON_GetObjectItem(fdesc, "sd")->valuedouble;
+      ml_float fdesc_mean=0.0, fdesc_sd=0.0;
+      if(!get_float_value_from_json(fdesc, "mean", fdesc_mean) ||
+	 !get_float_value_from_json(fdesc, "sd", fdesc_sd)) {
+	log_error("missing mean/sd from instance definition\n");
+	return(false);
+      }
+      mlfd->mean = fdesc_mean;
+      mlfd->sd = fdesc_sd;
     }
     else {
-      mlfd->discrete_mode_index = cJSON_GetObjectItem(fdesc, "discrete_mode_index")->valueint;
+      ml_uint dmi=0;
+      if(!get_numeric_value_from_json(fdesc, "discrete_mode_index", dmi)) {
+	log_error("missing discrete feature index\n");
+	return(false);
+      }
       
-      cJSON *values_array = cJSON_GetObjectItem(fdesc, "discrete_values");
-      for(int jj=0; jj < cJSON_GetArraySize(values_array); ++jj) {
-	mlfd->discrete_values.push_back(cJSON_GetArrayItem(values_array, jj)->valuestring);
-	mlfd->discrete_values_map[cJSON_GetArrayItem(values_array, jj)->valuestring] = jj;
+      mlfd->discrete_mode_index = dmi;
+
+      if(!fdesc.contains<ml_string>("discrete_values") ||
+	 !fdesc["discrete_values"].is_array()) {
+	log_error("missing discrete feature values\n");
+	return(false);
+      }
+      
+      const json &values_array = fdesc["discrete_values"];
+      for(ml_uint jj=0; jj < values_array.size(); ++jj) {
+	mlfd->discrete_values.push_back(values_array[jj]);
+	mlfd->discrete_values_map[values_array[jj]] = jj;
       }
 
-      cJSON *values_count_array = cJSON_GetObjectItem(fdesc, "discrete_values_count");
-      for(int jj=0; jj < cJSON_GetArraySize(values_count_array); ++jj) {
-	mlfd->discrete_values_count.push_back(cJSON_GetArrayItem(values_count_array, jj)->valueint);
+      if(!fdesc.contains<ml_string>("discrete_values_count") ||
+	 !fdesc["discrete_values_count"].is_array()) {
+	log_error("missing discrete feature values counts\n");
+	return(false);
+      }
+      
+      const json &values_count_array = fdesc["discrete_values_count"];
+      for(ml_uint jj=0; jj < values_count_array.size(); ++jj) {
+	mlfd->discrete_values_count.push_back(values_count_array[jj]);
       }
     }
     
@@ -693,29 +592,22 @@ static bool createInstanceDefinitionFromJSONObject(cJSON *json_object, ml_instan
 
 bool write_instance_definition_to_file(const ml_string &path_to_file, 
 				       const ml_instance_definition &mlid) {
-  cJSON *json_object = createJSONObjectFromInstanceDefinition(mlid);
-  if(!json_object) {
-    log_error("couldn't create json object from instance definition\n");
-    return(false);
-  }
+  json json_mlid;
+  fillJSONObjectFromInstanceDefinition(json_mlid, mlid);
+  std::ofstream mlidout(path_to_file);
+  mlidout << std::setw(4) << json_mlid << std::endl; 
 
-  bool status = write_model_json_to_file(path_to_file, json_object);
-  cJSON_Delete(json_object);
-
-  return(status);
+  return(true);
 }
 
 
 bool read_instance_definition_from_file(const ml_string &path_to_file, ml_instance_definition &mlid) {
   mlid.clear();
-  cJSON *json_object = read_model_json_from_file(path_to_file);
-  if(!json_object) {
-    log_error("couldn't load instance definition json object from model file: %s\n", path_to_file.c_str());
-    return(false);
-  }
+  std::ifstream jsonfile(path_to_file);
+  json json_mlid;
+  jsonfile >> json_mlid;
 
-  bool status = createInstanceDefinitionFromJSONObject(json_object, mlid);
-  cJSON_Delete(json_object);
+  bool status = createInstanceDefinitionFromJSONObject(json_mlid, mlid);
 
   return(status);
 }

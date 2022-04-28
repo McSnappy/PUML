@@ -2,11 +2,12 @@
 Poor Unwashed Machine Learner
 -----------------------------
 
-A simple-headed C++11 implementation of Decision Trees, Random Forest, Boosted Trees, kNN, and k-means.
+A simple-headed C++11 implementation of Decision Trees / Random Forest
 
-The included sample program, mltest, uses the [Iris](https://archive.ics.uci.edu/ml/datasets/Iris ""), [Covertype](https://archive.ics.uci.edu/ml/datasets/Covertype ""), and [Wine Quality](https://archive.ics.uci.edu/ml/datasets/Wine+Quality "") datasets from UCI to demonstrate building trees and forests.  
+The included sample program, mltest, uses the [Iris](https://archive.ics.uci.edu/ml/datasets/Iris "") and [Covertype](https://archive.ics.uci.edu/ml/datasets/Covertype "") datasets from UCI to demonstrate building trees and forests.  
 
-PUML uses Dave Gamble's [cJSON](https://github.com/DaveGamble/cJSON "cJSON") (MIT) to read/write its models, and John Burkardt's implementation of Brent's Method [BRENT](https://people.sc.fsu.edu/~jburkardt/c_src/brent/brent.html "BRENT") (LGPL).
+PUML uses [rapidcsv](https://github.com/d99kris/rapidcsv "rapidcsv") (BSD-3) to handle csv data
+and [this](https://github.com/nlohmann/json "json") (MIT) for json
   
   
 Build and run mltest:

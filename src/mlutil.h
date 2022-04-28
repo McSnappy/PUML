@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2016 Carl Sherrell
+Copyright (c) Carl Sherrell
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -40,11 +40,11 @@ namespace puml {
 					  const ml_instance_definition &mlid,
 					  ml_vector<decision_tree> &trees);
 
-  bool get_numeric_value_from_json(cJSON *json_object, const ml_string &name, ml_uint &value);
-  bool get_float_value_from_json(cJSON *json_object, const ml_string &name, ml_float &value);
-  bool get_double_value_from_json(cJSON *json_object, const ml_string &name, ml_double &value);
-  bool get_bool_value_from_json(cJSON *json_object, const ml_string &name, bool &value);
-  bool get_modeltype_value_from_json(cJSON *json_object, const ml_string &name, ml_model_type &value);
+  bool get_numeric_value_from_json(const json &json_object, const ml_string &name, ml_uint &value);
+  bool get_float_value_from_json(const json &json_object, const ml_string &name, ml_float &value);
+  bool get_double_value_from_json(const json &json_object, const ml_string &name, ml_double &value);
+  bool get_bool_value_from_json(const json &json_object, const ml_string &name, bool &value);
+  bool get_modeltype_value_from_json(const json &json_object, const ml_string &name, ml_model_type &value);
 
 
   //

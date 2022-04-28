@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2016 Carl Sherrell
+Copyright (c) Carl Sherrell
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -93,8 +93,8 @@ class decision_tree final {
  
 
   //
-  // A tree within an ensemble (random_forest, boosted_trees) writes
-  // just its tree json without the mlid.  A single tree gets its own
+  // A tree within an ensemble (random_forest) writes just
+  // its tree json without the mlid.  A single tree gets its own
   // directory with save tree and mlid json.
   //
   bool save(const ml_string &path, bool part_of_ensemble=false) const;
@@ -167,7 +167,7 @@ class decision_tree final {
   void config_leaf_node(const ml_data &mld, dt_node_ptr &leaf);
   bool prune_twin_leaf_nodes(dt_node_ptr &node);
   bool find_best_split(const ml_data &mld, dt_split &best_split, ml_double score);
-  bool create_decision_tree_from_json(cJSON *json_object);
+  bool create_decision_tree_from_json(const json &json_object);
 };
 
 
